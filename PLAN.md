@@ -1,6 +1,6 @@
-# Heads-Up: PLAN (Phase 0)
+# Heads-Up: PLAN v2 (24 Oct 2026)
 
-Status: DRAFT, 23 Oct 2026 (Phase 0 review fixes applied 24 Oct 2026). **Rewritten 24 Oct 2026 for Prateek's reply** (GitHub + calendar only, no digest, pilot first). **Spike done. Official weights on MLX FAILED the swap criterion (history); the Ollama MXFP8 build PASSED clean (swap 0.0 -> 0.0 MB, p95 0.313 s, Dev: usable) and fidelity (max abs diff 0.0392 <= 0.05). Chosen design: that third-party build, NOT the official weights (Dev tells Prateek).** See spike/SPIKE_REPORT.md.
+Status: v2, told Prateek 24 Oct; pending his OK. **Spike done. Official weights on MLX FAILED the swap criterion (history); the Ollama MXFP8 build PASSED clean (swap 0.0 -> 0.0 MB, p95 0.313 s, Dev: usable) and fidelity (max abs diff 0.0392 <= 0.05). Chosen design: that third-party build, NOT the official weights (Dev tells Prateek).** See spike/SPIKE_REPORT.md.
 Rule used throughout: anything I could not confirm from an official page is marked **UNVERIFIED**.
 
 **Time log** (`date`): research session earlier today; continuation started `Fri Oct 23 15:59:04 IST 2026`, time-box 75 min (to ~17:14).
@@ -53,12 +53,12 @@ Anthropic opened a research preview of Claude Duet (a proactive agent) on 21 Oct
 collect -> normalize (one Event schema) -> dedupe (hash of source+id+content)
   -> Decider probability (local, noul question)
   -> threshold + daily interrupt limit (5)
-       yes -> Haiku writes message text -> Telegram + buttons
+       yes -> Haiku writes message text (template if Haiku fails) -> Telegram + buttons
        no  -> logged in SQLite only (no digest)
   -> every step written to SQLite decision log (event, prob, threshold, verdict, tokens, cost)
 ```
 **Memory policy (DESIGN DECISION, not a measured pass): the Decider is NOT kept loaded.** Each request carries a short `keep_alive`, proposed 60 s, so Ollama unloads the model shortly after each batch. `OLLAMA_KEEP_ALIVE` is documented: models stay loaded 5 minutes by default; the env var, set when starting the server, changes that; a per-request `keep_alive` on `/api/generate` and `/api/chat` overrides it (0 unloads right after the response, negative keeps loaded) (Ollama FAQ, https://docs.ollama.com/faq, read 24 Oct 2026). The spike itself used `OLLAMA_KEEP_ALIVE=-1` (spike/README.md). **UNVERIFIED:** only whether `/v1/systemone` honours a per-request `keep_alive` (the FAQ names other endpoints); the server-wide `OLLAMA_KEEP_ALIVE=60s` is the fallback. Why: in the normal run (38% memory free before) the loaded model still pushed 2,009.9 MB to swap, and cold load is only 2.6 s (clean) to 3.7 s (normal), so reloading per batch is cheap. A full load-decide-unload cycle, and swap after unload, are not measured.
-Failure modes: Decider down or too slow -> log only (never interrupt blind). One transient Haiku failure/refusal/timeout on an already-decided interrupt -> template text; repeated or auth/quota failures -> stop the run and tell Prateek (Key rules). Telegram down -> retry next run; nothing lost (SQLite).
+Failure modes: Decider down or too slow -> log only (never interrupt blind). One transient Haiku failure/refusal/timeout -> template text for that message; repeated, auth or quota failures -> stop calling Haiku for the rest of the run, keep sending alerts with template text, and show Dev a clear error (Key rules, 8b). Telegram down -> retry next run; nothing lost (SQLite).
 
 Event schema (draft): `id, source, kind, title, body(untrusted), url, occurred_at, fetched_at, content_hash`.
 
@@ -109,27 +109,34 @@ Runs on this Mac only (Apple M2, 8 GB RAM; see preflight). No cloud, no public U
 ## 6. Resources
 
 ### Libraries (licence : source)
+**App runtime** (the app talks to Ollama over HTTP only; it does not import strands-decider)
 | Library | Purpose | Licence | Source |
 |---|---|---|---|
-| strands-decider 0.2.0 | local Decider | Apache-2.0 | [A1],[A2] |
+| httpx 0.28.1 | HTTP (Ollama, GitHub, iCal, Telegram) | BSD-3-Clause | https://pypi.org/pypi/httpx/json |
+| icalendar 7.3.0 | parse iCal | BSD-2-Clause | [A14],[A15] |
+| recurring-ical-events 3.8.2 | expand RRULE/EXDATE | LGPL-3.0-or-later (dynamic use as a pip dependency; I am not giving legal advice) | [A16] |
+| anthropic SDK 2.1.0 | Haiku calls | Apache-2.0 | https://pypi.org/pypi/anthropic/json |
+| python-dotenv (version and licence to be pinned and verified at build; not yet checked) | the ONE way `.env` is loaded (Key rules; decided by Dev) | UNVERIFIED | - |
+| Ollama 0.40.9 (external program, not a pip dependency; installed 23 Oct) | serves the Decider build | UNVERIFIED (licence to verify; not checked) | - |
+
+**Spike only, not app dependencies**
+| Library | Purpose | Licence | Source |
+|---|---|---|---|
+| strands-decider 0.2.0 | official Decider (spike MLX/MPS runs) | Apache-2.0 | [A1],[A2] |
 | torch 2.14.1 (Decider dep) | model runtime | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT (PyPI `license_expression`) | https://pypi.org/pypi/torch/json |
 | transformers 5.20.2 (Decider dep) | model runtime | Apache 2.0 (PyPI `license` field) | https://pypi.org/pypi/transformers/json |
 | peft 0.21.2, accelerate 1.15.0 (Decider deps) | adapter + loading | UNVERIFIED (not asked) | - |
 | mlx 0.32.4, mlx-lm 0.32.2 (`[mlx]` extra) | faster Mac serving | MIT, MIT | https://pypi.org/pypi/mlx/json ; https://pypi.org/pypi/mlx-lm/json |
-| icalendar 7.3.0 | parse iCal | BSD-2-Clause | [A14],[A15] |
-| recurring-ical-events 3.8.2 | expand RRULE/EXDATE | LGPL-3.0-or-later (dynamic use as a pip dependency; I am not giving legal advice) | [A16] |
-| anthropic SDK 2.1.0 | Haiku calls | Apache-2.0 | https://pypi.org/pypi/anthropic/json |
-| httpx 0.28.1 | HTTP | BSD-3-Clause | https://pypi.org/pypi/httpx/json |
-| python-dotenv (version and licence to be pinned and verified at build; not yet checked) | the ONE way `.env` is loaded (Key rules; decided by Dev) | UNVERIFIED | - |
-| detect-secrets 1.5.0 | secret scan | Apache Software License (PyPI classifier; `license` field empty) | https://pypi.org/pypi/detect-secrets/json |
-| Qwen3.5-2B-Base (Decider's base model) | weights | apache-2.0 (Hugging Face model metadata) | https://huggingface.co/api/models/Qwen/Qwen3.5-2B-Base |
+| Qwen3.5-2B-Base (Decider's base model) | weights (the app uses Ollama's build instead) | apache-2.0 (Hugging Face model metadata) | https://huggingface.co/api/models/Qwen/Qwen3.5-2B-Base |
+
+**Dev tooling (not app runtime):** detect-secrets 1.5.0, Apache Software License (PyPI classifier; `license` field empty), https://pypi.org/pypi/detect-secrets/json
 
 ### Accounts, tokens, minimum scopes
 | Env var | Needed for | Minimum scope |
 |---|---|---|
 | GITHUB_TOKEN | read repo | CORRECTED: a fine-grained token is limited to ONE resource owner (user or org) and cannot be scoped to a repo we do not own, so it cannot be limited to `strands-labs/strands-decider`. The watched repo is public, and "Tokens always include read-only access to all public repositories" (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens). So use a fine-grained token with resource owner = Dev's own account and NO extra permissions (public read-only) for authenticated rate limits; do not grant it Contents/Issues/PR/Actions permissions on our own repos. Whether ETag 304s are free when authorized is from [A6],[A7]; unauthenticated is 60/h. Private-repo or user-specific events (e.g. review requests) are not covered: UNVERIFIED |
 | GITHUB_ACTIONS_WRITE_TOKEN | "Re-run failed CI" only | separate fine-grained token, ONE repo, **Actions: write** [A8] |
-| ANTHROPIC_API_KEY | Haiku writer | API key (workspace spend limit recommended) |
+| ANTHROPIC_API_KEY | Haiku writer and evaluation decider | API key (workspace spend limit recommended) |
 | TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID | bot + allowlisted chat | create bot via BotFather (UNVERIFIED step, not fetched) |
 | ICAL_URL | calendar | Google "Secret address in iCal format"; anyone with it can read the calendar; Reset if leaked [A13] |
 
@@ -159,8 +166,9 @@ Prices: Haiku 5.5 input $0.10/MTok, output $0.50/MTok for prompts <=100K tokens 
 | 8 | Haiku writer + fallback + data minimisation | `test_writer_uses_haiku_then_template_on_error`; `test_writer_sends_only_type_title_time` |
 | 9 | Python | `test_package_runs_on_supported_python` (pins the version from the spike) |
 | 10 | Logged real cost/day (runtime and eval separately) | `test_costlog_records_usage_and_sums_per_day` |
-| 11 | Key rules (section 8b) | `test_haiku_model_id_is_only_claude_haiku_5_5`; `test_haiku_not_called_when_not_needed`; `test_haiku_failure_stops_and_reports`; `test_env_loaded_in_one_place_and_never_logged` |
+| 11 | Key rules (section 8b) | `test_haiku_model_id_is_only_claude_haiku_5_5`; `test_haiku_not_called_when_not_needed`; `test_haiku_failure_falls_back_to_template_and_stops_calling`; `test_env_loaded_in_one_place_and_never_logged` |
 | 12 | Haiku decider (evaluation only) call cap = 200 | `test_haiku_decider_stops_at_call_cap` |
+| 13 | README disclosures | Checklist at release (Build Day 4), not a test: the README states (1) it runs only while the laptop is awake; (2) synthetic data may inflate results; (3) the Decider is Ollama's third-party build, not the official weights; (4) "inspired by Claude Duet"; (5) tested only on an M2 with 8 GB |
 
 ## 8. Ask-before-acting design (learner part 3)
 - **Fixed allowlist in code** (not config, not LLM): `snooze_1h`, `remind_later`, `rerun_failed_ci` (the ONLY GitHub write: POST `/repos/{o}/{r}/actions/runs/{id}/rerun-failed-jobs`, needs Actions:write [A8]).
@@ -170,22 +178,27 @@ Prices: Haiku 5.5 input $0.10/MTok, output $0.50/MTok for prompts <=100K tokens 
 - `callback_data` is 1-64 bytes [A4], so it holds only a short opaque token (e.g. 16 hex chars) that maps to a DB row; never action names from event text.
 - **Idempotency key** per (event, action); second tap = "already done".
 - **Every tap logged** (who, when, action, outcome).
-- **Event text is UNTRUSTED** (issue titles, page text, invites). The LLM only writes message text; it cannot choose, create or trigger buttons or actions. Buttons come from code based on event kind.
-- **Data minimisation**: only the event type, title and time go to Haiku. Never bodies, page text, attendee lists or descriptions. Test: `test_writer_sends_only_type_title_time` (requirement 8).
+- **Event text is UNTRUSTED** (issue titles, invites). The LLM only writes message text; it cannot choose, create or trigger buttons or actions. Buttons come from code based on event kind.
+- **Data minimisation**: only the event type, title and time go to Haiku. Never bodies, attendee lists or descriptions. Test: `test_writer_sends_only_type_title_time` (requirement 8).
 - **Required test**: `test_no_write_request_without_allowlisted_callback` (HTTP layer mocked; assert zero write calls for: no callback, wrong chat, expired, unknown token, replayed token, LLM output containing "rerun").
 
 ## 8b. Key rules (Haiku and the API key)
 1. **Model: `claude-haiku-5-5` only.** Any other model id is an error (test).
 2. **Call Haiku only when needed:** (a) to write the message for an event that already passed the interrupt decision and the daily limit; (b) the capped evaluation Haiku decider (200 calls). Never for events that are only logged.
-3. **The key lives in `.env`** (gitignored; `.env.example` lists names only). **One loading method: `python-dotenv`'s `load_dotenv()`, called once, in `config.py` only;** nothing else reads the environment, and values are never logged or printed. I never open `.env`.
-4. **If calls fail** (auth, quota, repeated errors): stop the run and tell Prateek. No retry loops, no other model. Only a single transient failure on an already-decided interrupt falls back to the template text.
+3. **The key lives in `.env`** (gitignored; `.env.example` lists names only). **One loading method: `python-dotenv`'s `load_dotenv()`, called once, in `config.py` only;** nothing else reads the environment, and values are never logged or printed. Claude Code never opens .env (blocked in .claude/settings.json).
+4. **If Haiku calls fail:** one transient failure -> template text for that message. Repeated, auth or quota failures -> stop calling Haiku for the rest of the run, keep sending alerts with template text, and show Dev a clear error; Dev tells Prateek. No retries, no other key or model. (In the evaluation Haiku-decider run, repeated/auth/quota failures stop the eval run; no template is involved.)
 5. **Report the real spend** from the API `usage` fields: runtime and eval, separately.
 
 ## 9. Evaluation protocol
 Order (fixed): 1) write and FREEZE the rules baseline -> 2) write the rubric -> 3) event generator -> 4) Dev's labels -> 5) pilot: run the three deciders -> 6) write-up and go/no-go -> main set: label, fix split by seed, tune, test once.
 - **The rules baseline is frozen BEFORE the pilot** and never changed after seeing any results. If it is ever changed, the new version is reported alongside the old one. **Pilot events are never reused in the main set.**
-- **9.0 Pilot, before building:** ~30 labelled synthetic events (GitHub + calendar), comparing three deciders: the frozen rules baseline, the Decider (Ollama build) and Haiku as a decider (evaluation only). Purpose: decide whether the Decider is worth building around, before spending build days (go/no-go).
+- **9.0 Pilot, before building:** ~30 labelled synthetic events (GitHub + calendar), comparing three deciders: the frozen rules baseline, the Decider (Ollama build) and Haiku as a decider (evaluation only). Purpose: decide whether the Decider is worth building around, before spending build days (go/no-go). Rules fixed before any run:
+  - (a) **At most 3 Decider question formats, listed now:** F1 a plain yes/no question; F2 yes/no with the context "Dev maintains this repo..." (exact wording fixed in the rubric before labelling); F3 a choice question "interrupt now / can wait". No other formats in the pilot. **UNVERIFIED, to settle on pilot day before any scored run (this is not tuning):** whether the Decider's `/v1/systemone` supports a choice-type question (the spike used only `noul` yes/no). If not, F3 is asked as a `noul` question phrased as the choice, and that is reported.
+  - (b) **One Haiku decider prompt, fixed now and not tuned on the pilot.** Its text is saved before the first call; any later change is a new version reported alongside the old.
+  - (c) **Go/no-go:** if the best Decider format misses more than half of the "interrupt" events (recall below 50%) at every threshold that keeps alerts within 5 per day, stop and report to Prateek before building.
+  - (d) **Model-card warning (raised by Prateek):** the Decider's card, section Limitations, says "`score` and `noul` transfer poorly to rubrics and yes/no tasks unlike the training mix", and also "Questions are read less than documents" and "measure on your own traffic before you trust a threshold" (https://huggingface.co/StrandsAgents/strands-decider-2B-qwen3.5-v1-2610, read 24 Oct 2026 through a summarising tool). The pilot write-up quotes the source verbatim; re-read the exact wording on the page before quoting.
 - **Haiku as a decider is evaluation only,** with a hard cap on calls: **200 for the whole project, enforced in code (Dev's decision: pilot 30 + main set 100 = 130 calls, 70 spare).** It never decides live interrupts.
+- **Simulated days:** `eval/gen_synthetic.py` spreads events over simulated days at about 10 per day (pilot: 30 events over 3 days; main set: 100 over 10 days). Each event carries a simulated timestamp and the daily limit of 5 is applied per simulated day, so the "missed within the daily limit" metric can be non-zero.
 - **Data: fully synthetic** GitHub + calendar events from `eval/gen_synthetic.py`; no real data in the repo. **Synthetic data can inflate results:** generated events are cleaner and easier to separate than real ones, so these numbers are likely optimistic and are not field performance. Say this in the README and the write-up.
 - **Labelling persona:** labels are given as if Dev maintains the watched repo (otherwise almost no GitHub event deserves an interrupt). The rubric and README state this.
 - **Learners label 30 to 50 events of their own** (an exercise in the README and `starter`).
