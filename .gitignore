@@ -1,0 +1,14 @@
+.venv/
+.cache/
+.env
+*.db
+spike/vendor/
+spike/runs/
+drafts/
+*.mov
+*.mp4
+.DS_Store
+
+# spike leftovers
+spike/ollama_work/serve.log
+spike/ollama_work/*.orig

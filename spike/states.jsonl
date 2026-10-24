@@ -1,0 +1,30 @@
+{"id":"gh01","source":"github","state":"GitHub repo example/widgets: new release v2.4.0 published with 12 bug fixes."}
+{"id":"gh02","source":"github","state":"GitHub repo example/widgets: CI workflow 'tests' failed on main for commit a1b2c3d (2 of 14 jobs failed)."}
+{"id":"gh03","source":"github","state":"GitHub repo example/widgets: Dev was requested as a reviewer on pull request #88 'Fix retry loop'."}
+{"id":"gh04","source":"github","state":"GitHub repo example/widgets: issue #91 opened: typo in README install section."}
+{"id":"gh05","source":"github","state":"GitHub repo example/widgets: bot labelled issue #52 as 'stale'."}
+{"id":"gh06","source":"github","state":"GitHub repo example/widgets: security advisory published: critical vulnerability in the parser, patch in v2.4.1."}
+{"id":"gh07","source":"github","state":"GitHub repo example/widgets: pull request #90 'Bump docs dependencies' opened by dependabot."}
+{"id":"gh08","source":"github","state":"GitHub repo example/widgets: issue #77 closed as completed by a maintainer."}
+{"id":"gh09","source":"github","state":"GitHub repo example/widgets: release v2.4.1-rc1 (pre-release) published."}
+{"id":"gh10","source":"github","state":"GitHub repo example/widgets: CI workflow 'nightly' failed on main for the third night in a row."}
+{"id":"cal01","source":"calendar","state":"Calendar: 'Team standup' starts in 10 minutes (recurring, daily)."}
+{"id":"cal02","source":"calendar","state":"Calendar: 'Dentist appointment' moved from 16:00 to 09:00 tomorrow."}
+{"id":"cal03","source":"calendar","state":"Calendar: 'Project review with manager' starts in 5 minutes."}
+{"id":"cal04","source":"calendar","state":"Calendar: new all-day event 'Company holiday' added for next month."}
+{"id":"cal05","source":"calendar","state":"Calendar: 'Lunch with Sam' cancelled by the organiser."}
+{"id":"cal06","source":"calendar","state":"Calendar: 'Flight to Berlin' departs today at 18:40; check-in closes in 30 minutes."}
+{"id":"cal07","source":"calendar","state":"Calendar: description of 'Book club' updated with a new reading list."}
+{"id":"cal08","source":"calendar","state":"Calendar: 'Quarterly planning' now overlaps with 'Interview with candidate' on Thursday."}
+{"id":"cal09","source":"calendar","state":"Calendar: reminder 'Water the plants' fires at 07:00."}
+{"id":"cal10","source":"calendar","state":"Calendar: invitation to 'Demo day' sent for next Friday, response needed by Monday."}
+{"id":"web01","source":"web","state":"Web page changelog.example.org/CHANGELOG.md changed: added line 'v3.1.0 - fixed crash on startup'."}
+{"id":"web02","source":"web","state":"Web page changelog.example.org/CHANGELOG.md changed: whitespace and trailing newline only."}
+{"id":"web03","source":"web","state":"Web page status.example.org changed: banner now reads 'Major outage: API unavailable'."}
+{"id":"web04","source":"web","state":"Web page status.example.org changed: copyright year updated to 2026."}
+{"id":"web05","source":"web","state":"Web page pricing.example.org changed: the Pro plan price went from 10 to 12 dollars per month."}
+{"id":"web06","source":"web","state":"Web page docs.example.org/install changed: one typo fixed in a code comment."}
+{"id":"web07","source":"web","state":"Web page blog.example.org changed: new post 'Our 2026 roadmap' added to the list."}
+{"id":"web08","source":"web","state":"Web page changelog.example.org/CHANGELOG.md changed: a section was marked 'DEPRECATED: v2 API removed on 1 November'."}
+{"id":"web09","source":"web","state":"Web page example.org/careers changed: two job listings reordered."}
+{"id":"web10","source":"web","state":"Web page security.example.org changed: new notice 'Rotate your API keys today'."}
