@@ -13,3 +13,8 @@ drafts/
 spike/ollama_work/serve.log
 spike/ollama_work/*.orig
 .claude/settings.local.json
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
