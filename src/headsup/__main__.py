@@ -16,7 +16,7 @@ import httpx
 
 from headsup import pipeline
 from headsup.actions import ActionHandler, DryRunWriter, GitHubWriter
-from headsup.config import load_settings
+from headsup.config import CHOSEN_FORMAT, CHOSEN_NOTE, CHOSEN_THRESHOLD, load_settings
 from headsup.costlog import CostLog
 from headsup.decider import Decider
 from headsup.haiku import build_client
@@ -44,6 +44,13 @@ def parse_args(argv):
     return p.parse_args(argv)
 
 
+def threshold_note(settings):
+    """The label shown in decision reasons: only true while the app runs the pair chosen in the main evaluation."""
+    if (settings.decider_format, settings.decider_threshold) == (CHOSEN_FORMAT, CHOSEN_THRESHOLD):
+        return CHOSEN_NOTE
+    return "format or threshold set in .env"
+
+
 def build_app(settings, *, client, anthropic_client, now, dry_run, out, store, sleep=time.sleep, monotonic=time.monotonic):
     sources, unconfigured = [], []
     if settings.github_repos:
@@ -58,7 +65,7 @@ def build_app(settings, *, client, anthropic_client, now, dry_run, out, store, s
         anthropic_client = build_client(settings.anthropic_api_key)
     app = pipeline.App(
         store=store, client=client, decider=Decider(client, settings.decider_host, settings.decider_format),
-        policy=Policy(store, settings.decider_threshold, now=now),
+        policy=Policy(store, settings.decider_threshold, now=now, note=threshold_note(settings)),
         writer=Writer(anthropic_client, CostLog(store, now=now), dry_run=dry_run), sources=sources,
         unconfigured=unconfigured, key_missing=not settings.anthropic_api_key,
         write_repos=settings.github_write_repos, decider_host=settings.decider_host, dry_run=dry_run,

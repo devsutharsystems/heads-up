@@ -20,9 +20,9 @@ class Clock:
         return self.now
 
 
-def make(tmp_path, now=NOON, threshold=0.35):
+def make(tmp_path, now=NOON, threshold=0.35, note=None):
     clock = Clock(now)
-    return Policy(Store(tmp_path / "t.db"), threshold, now=clock), clock
+    return Policy(Store(tmp_path / "t.db"), threshold, now=clock, note=note), clock
 
 
 def test_policy_interrupts_above_threshold_else_logs_only(tmp_path):
@@ -32,7 +32,7 @@ def test_policy_interrupts_above_threshold_else_logs_only(tmp_path):
     below = p.decide(ev(3), 0.20)
     none = p.decide(ev(4), None)
     assert [d.verdict for d in (above, equal, below, none)] == ["interrupt", "interrupt", "log_only", "log_only"]
-    assert "0.50 >= threshold 0.35" in above.reason and "TEMPORARY" in above.reason
+    assert above.reason == "probability 0.50 >= threshold 0.35" and "TEMPORARY" not in above.reason
     assert "< threshold" in below.reason and "unavailable" in none.reason
     assert (above.probability, above.threshold, none.probability) == (0.50, 0.35, None)
     # every event got a stored decision, in order
@@ -74,3 +74,12 @@ def test_below_threshold_events_do_not_count_toward_the_limit(tmp_path):
         p.decide(ev(i), 0.1)
     assert p.interrupts_today() == 0
     assert p.decide(ev(99), 0.9).verdict == "interrupt"
+
+
+def test_the_reason_says_where_the_threshold_came_from_when_it_is_the_chosen_one(tmp_path):
+    from headsup.config import CHOSEN_NOTE
+    p, _ = make(tmp_path, threshold=0.40, note=CHOSEN_NOTE)
+    up, down = p.decide(ev(1), 0.55), p.decide(ev(2), 0.30)
+    assert up.reason == "probability 0.55 >= threshold 0.40; chosen on tune days in the main evaluation (eval/EVAL_REPORT.md)"
+    assert down.reason == "probability 0.30 < threshold 0.40; chosen on tune days in the main evaluation (eval/EVAL_REPORT.md)"
+    assert "TEMPORARY" not in up.reason + down.reason

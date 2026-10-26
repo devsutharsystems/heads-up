@@ -299,3 +299,15 @@ def test_secrets_never_reach_output_or_logs(tmp_path, caplog):
     text = caplog.text + "\n".join(out)
     for secret in (BOT, "FAKE-bot-token", WRITE_TOKEN, READ_TOKEN, ICAL_URL, "secret-address-made-up", "fake-anthropic-key"):
         assert secret not in text
+
+
+def test_decision_reasons_carry_the_chosen_note_only_while_the_app_runs_the_chosen_pair(tmp_path):
+    from headsup.__main__ import build_app, threshold_note
+    from headsup.config import CHOSEN_NOTE
+    chosen = settings(decider_format="F2", decider_threshold=0.40)
+    assert threshold_note(chosen) == CHOSEN_NOTE
+    for other in (settings(decider_format="F1", decider_threshold=0.40), settings(decider_format="F2", decider_threshold=0.35)):
+        assert threshold_note(other) == "format or threshold set in .env"
+    app = build_app(chosen, client=world().client, anthropic_client=None, now=Clock(), dry_run=True, out=lambda s: None,
+                    store=store_at(tmp_path), sleep=lambda s: None)
+    assert app.policy.threshold == 0.40 and app.decider.fmt == "F2" and app.policy._note.endswith(CHOSEN_NOTE)

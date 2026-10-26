@@ -254,6 +254,6 @@ def render_caveats(limitations_text):
             "- Haiku is non-deterministic and was called once per event.",
             "- The bootstrap treats events as independent. Events within a day are not, so the intervals are probably slightly too narrow.",
             "- 70 test events give wide intervals; a difference of a few events is not a winner.",
-            "- The live configuration (`DECIDER_FORMAT`, `DECIDER_THRESHOLD`) is unchanged by this report; the threshold stays TEMPORARY until Dev applies the pair chosen above.",
+            "- The app defaults (`DECIDER_FORMAT`, `DECIDER_THRESHOLD` in `src/headsup/config.py`) are set to the pair chosen above; they can still be overridden in `.env`.",
             "- The Decider's model card (https://huggingface.co/StrandsAgents/strands-decider-2B-qwen3.5-v1-2610) says, verbatim:", "",
             "```text", limitations_text.strip(), "```", ""]

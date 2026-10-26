@@ -10,6 +10,12 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV = ROOT / ".env"
 
 
+# The pair chosen on the tune days in the main evaluation (eval/main_selection.json, eval/EVAL_REPORT.md).
+CHOSEN_FORMAT = "F2"
+CHOSEN_THRESHOLD = 0.40
+CHOSEN_NOTE = "chosen on tune days in the main evaluation (eval/EVAL_REPORT.md)"
+
+
 @dataclass(frozen=True)
 class Settings:
     anthropic_api_key: str | None = field(default=None, repr=False)
@@ -17,8 +23,8 @@ class Settings:
     github_token: str | None = field(default=None, repr=False)
     ical_url: str | None = field(default=None, repr=False)  # a secret address
     reminder_lead_minutes: int = 30  # the rubric's "soon"
-    decider_format: str = "F1"
-    decider_threshold: float = 0.35  # TEMPORARY: a placeholder until the main evaluation picks format and threshold
+    decider_format: str = CHOSEN_FORMAT  # chosen on tune days in the main evaluation (eval/EVAL_REPORT.md)
+    decider_threshold: float = CHOSEN_THRESHOLD  # chosen on tune days in the main evaluation (eval/EVAL_REPORT.md)
     decider_host: str = "127.0.0.1:11434"
     telegram_bot_token: str | None = field(default=None, repr=False)
     telegram_chat_id: int | None = field(default=None, repr=False)
@@ -59,7 +65,7 @@ def _lead_minutes(raw):
 
 def _decider_format(raw):
     if raw is None or not raw.strip():
-        return "F1"
+        return CHOSEN_FORMAT
     if raw.strip() not in ("F1", "F2", "F3"):
         raise ValueError("DECIDER_FORMAT must be F1, F2 or F3")
     return raw.strip()
@@ -67,7 +73,7 @@ def _decider_format(raw):
 
 def _decider_threshold(raw):
     if raw is None or not raw.strip():
-        return 0.35  # TEMPORARY default
+        return CHOSEN_THRESHOLD
     try:
         value = float(raw)
     except ValueError:

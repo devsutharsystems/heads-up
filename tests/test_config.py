@@ -70,7 +70,7 @@ def test_decider_settings_defaults_and_parsing(tmp_path, monkeypatch):
     for k in ("DECIDER_FORMAT", "DECIDER_THRESHOLD", "DECIDER_HOST"):
         monkeypatch.delenv(k, raising=False)
     s = load_settings(tmp_path / "nothing.env")
-    assert (s.decider_format, s.decider_threshold, s.decider_host) == ("F1", 0.35, "127.0.0.1:11434")
+    assert (s.decider_format, s.decider_threshold, s.decider_host) == ("F2", 0.40, "127.0.0.1:11434")
     env = tmp_path / ".env"
     env.write_text("DECIDER_FORMAT=F3\nDECIDER_THRESHOLD=0.5\nDECIDER_HOST=localhost:11436\n")
     s = load_settings(env)
@@ -136,3 +136,22 @@ def test_the_real_env_file_can_never_be_loaded_by_tests():
     import pytest
     with pytest.raises(AssertionError, match="real .env"):
         load_settings()  # the default path is the project's .env: the guard in conftest.py refuses it
+
+
+def test_decider_defaults_are_the_pair_chosen_in_the_main_evaluation(tmp_path, monkeypatch):
+    import json
+    from headsup.config import CHOSEN_FORMAT, CHOSEN_NOTE, CHOSEN_THRESHOLD, Settings
+    sel = json.loads((ROOT / "eval" / "main_selection.json").read_text())
+    assert (CHOSEN_FORMAT, CHOSEN_THRESHOLD) == (sel["format"], sel["threshold"]) == ("F2", 0.40)
+    assert (Settings().decider_format, Settings().decider_threshold) == (sel["format"], sel["threshold"])
+    for k in ("DECIDER_FORMAT", "DECIDER_THRESHOLD"):
+        monkeypatch.delenv(k, raising=False)
+    s = load_settings(tmp_path / "nothing.env")
+    assert (s.decider_format, s.decider_threshold) == (sel["format"], sel["threshold"])
+    assert CHOSEN_NOTE == "chosen on tune days in the main evaluation (eval/EVAL_REPORT.md)"
+
+
+def test_the_old_temporary_label_is_gone_from_the_code_and_the_docs_we_ship():
+    for rel in ("src/headsup/config.py", "src/headsup/policy.py", "src/headsup/__main__.py", ".env.example", "eval/main_report.py",
+                "eval/EVAL_REPORT.md"):
+        assert "TEMPORARY" not in (ROOT / rel).read_text(), rel

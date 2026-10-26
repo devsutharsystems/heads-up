@@ -8,9 +8,15 @@ ENV_NAMES = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "GITHUB_REPOS", "GITHUB_WRITE_
 
 
 def test_env_example_lists_every_name_with_empty_values():
-    lines = [l for l in (ROOT / ".env.example").read_text().splitlines() if l.strip()]
+    lines = [l for l in (ROOT / ".env.example").read_text().splitlines() if l.strip() and not l.startswith("#")]  # comments are allowed
     assert [l.split("=")[0] for l in lines] == ENV_NAMES
     assert all(l.endswith("=") for l in lines)
+
+
+def test_env_example_comment_names_the_chosen_pair_and_its_source():
+    text = (ROOT / ".env.example").read_text()
+    assert "format F2 and threshold 0.40, chosen on tune days in the main evaluation (eval/EVAL_REPORT.md)" in text
+    assert "TEMPORARY" not in text
 
 
 def test_pyproject_pins_python_312_and_exact_versions():
