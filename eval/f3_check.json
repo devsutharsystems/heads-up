@@ -1,0 +1,13 @@
+{
+  "accepted": true,
+  "http_status": 200,
+  "response": {
+    "choice": "can wait",
+    "confidence": 0.08420231098661679,
+    "probabilities": {
+      "can wait": 0.6691448514911906,
+      "interrupt now": 0.3308551485088093
+    },
+    "type": "choice"
+  }
+}

@@ -1,0 +1,19 @@
+Source: https://huggingface.co/StrandsAgents/strands-decider-2B-qwen3.5-v1-2610/raw/main/README.md
+Read: 2026-10-26
+Section "Limitations", lines 343-357 of the raw README, verbatim:
+
+## Limitations
+
+- **Questions are read less than documents.** With the state and options fixed, a changed
+  question often gets the same answer. Phrase a question so the obvious reading is the
+  intended one.
+- **Long, multi-step documents are the weak spot**: JevBench's hard tier scores far below
+  its easy tier.
+- **`score` and `noul` transfer poorly** to rubrics and yes/no tasks unlike the training
+  mix. Train on a rubric resembling yours.
+- **Calibration is one temperature per primitive**, fitted on held-out short
+  classification. The confidence bands are established there only: measure on your own
+  traffic before you trust a threshold.
+- **Trained on public datasets**, so it inherits their domains and their label noise.
+
+`evaluation/README.md`, section "Limitations", has the measured figures behind each point.
