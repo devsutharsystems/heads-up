@@ -21,3 +21,6 @@ __pycache__/
 
 # pilot run logs
 eval/runs/
+
+# local state
+data/

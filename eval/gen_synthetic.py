@@ -2,7 +2,7 @@
 3 simulated days, about 10 per day.
 
 Deterministic: the event texts are fixed below; the seed only drives minute-level
-timestamp jitter. No network, no wall clock, stdlib only. Everything is fictional
+timestamp jitter. No network, no wall clock, stdlib only (plus headsup.schema). Everything is fictional
 (repo "lanternkit", people, and example.invalid URLs).
 
 The outputs carry no judgement about any event. The label sheet has an empty
@@ -12,7 +12,7 @@ NOTE for the main set (~100 events, built later): use a DIFFERENT seed and ids
 "main-NNN", and never repeat a pilot event (check source + kind + title against
 eval/pilot_events.jsonl). The main set is not generated here.
 
-Usage: .venv/bin/python -m eval.gen_synthetic [--seed N] [--out-dir DIR] [--force]
+Usage: PYTHONPATH=src .venv/bin/python -m eval.gen_synthetic [--seed N] [--out-dir DIR] [--force]
 """
 
 import argparse
@@ -24,26 +24,12 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from headsup.schema import Event
+
 PILOT_SEED = 2610
 DAY_ONE = datetime(2026, 11, 2, tzinfo=timezone.utc)  # Mon; days are Mon 2 to Wed 4 Nov 2026
 REPO = "example-org/lanternkit"
 SHEET_HEADER = ["id", "day", "time", "source", "kind", "title", "details", "label"]
-
-
-@dataclass
-class Event:
-    id: str
-    source: str
-    kind: str
-    title: str
-    body: str
-    url: str
-    occurred_at: datetime
-    fetched_at: datetime
-    content_hash: str
-    branch: str | None = None
-    start_time: datetime | None = None
-    all_day: bool = False
 
 
 @dataclass

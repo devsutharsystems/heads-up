@@ -1,0 +1,6 @@
+{"total_count": 2, "workflow_runs": [
+  {"id": 502, "name": "CI", "display_title": "Try feature", "head_branch": "feature/x", "status": "completed", "conclusion": "failure",
+   "updated_at": "2026-11-02T08:30:00Z", "html_url": "https://example.invalid/example-org/demo-repo/actions/runs/502"},
+  {"id": 501, "name": "CI", "display_title": "Merge fix", "head_branch": "main", "status": "completed", "conclusion": "failure",
+   "updated_at": "2026-11-02T08:00:00Z", "html_url": "https://example.invalid/example-org/demo-repo/actions/runs/501"}
+]}

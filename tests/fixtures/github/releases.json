@@ -1,0 +1,8 @@
+[
+  {"id": 101, "tag_name": "v1.2.0", "name": "Demo 1.2.0", "body": "Adds the thing.", "draft": false, "prerelease": false,
+   "published_at": "2026-11-02T09:00:00Z", "html_url": "https://example.invalid/example-org/demo-repo/releases/tag/v1.2.0"},
+  {"id": 102, "tag_name": "v1.3.0-draft", "name": "Unpublished", "body": "", "draft": true, "prerelease": false,
+   "published_at": null, "html_url": "https://example.invalid/example-org/demo-repo/releases/tag/v1.3.0-draft"},
+  {"id": 100, "tag_name": "v1.1.0", "name": "Demo 1.1.0", "body": "Old.", "draft": false, "prerelease": false,
+   "published_at": "2026-10-01T09:00:00Z", "html_url": "https://example.invalid/example-org/demo-repo/releases/tag/v1.1.0"}
+]

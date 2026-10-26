@@ -1,0 +1,17 @@
+[project]
+name = "heads-up"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx==0.28.1",
+    "icalendar==7.3.0",
+    "recurring-ical-events==3.8.2",
+    "anthropic==2.3.0",
+    "python-dotenv==1.2.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "detect-secrets==1.5.0",
+]
