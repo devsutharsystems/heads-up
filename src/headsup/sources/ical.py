@@ -7,7 +7,7 @@ and report:
 Time-to-start is start_time minus occurred_at (the poll time). An all-day event starts at 00:00 UTC.
 
 Fetch rules: https only, no userinfo, redirects are NOT followed (a 3xx is an error),
-10 s timeout, body capped at 2 MB. Times are UTC inside; a floating time (no zone) is taken as UTC.
+connect 10 s / read 15 s with one retry on a connect timeout only (headsup.netutil), body capped at 2 MB. Times are UTC inside; a floating time (no zone) is taken as UTC.
 The feed URL is a secret address, so it is never put into an Event or an error message.
 A moved event is only seen while it is inside the 48 h window both before and after the move.
 """
@@ -19,13 +19,13 @@ from urllib.parse import urlsplit
 import recurring_ical_events
 from icalendar import Calendar
 
+from headsup.netutil import TIMEOUT, with_connect_retry
 from headsup.schema import Event
 
 WINDOW = timedelta(hours=48)
 DEFAULT_LEAD_MINUTES = 30  # the rubric's "soon"
 MAX_LEAD_MINUTES = 48 * 60  # a longer lead than the window could never fire
 MAX_BYTES = 2 * 1024 * 1024
-TIMEOUT = 10.0
 BODY_MAX = 2000
 
 
@@ -59,6 +59,9 @@ class IcalSource:
         self._now = now or (lambda: datetime.now(timezone.utc))
 
     def _fetch(self):
+        return with_connect_retry(self._read_once)
+
+    def _read_once(self):
         with self.client.stream("GET", self._url, follow_redirects=False, timeout=TIMEOUT) as resp:
             if resp.status_code != 200:
                 raise IcalError(f"calendar fetch failed: HTTP {resp.status_code}")

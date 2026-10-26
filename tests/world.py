@@ -53,6 +53,10 @@ class World:
         self.runs = runs
         self.calendar = calendar
         self.decider_up = True
+        self.github_raise = None  # an exception instance to raise on every GitHub request
+        self.github_status = {}  # path -> status to answer instead of the fixture
+        self.calendar_status = 200
+        self.timeouts = []  # the timeout settings each GET carried
         self.telegram_fails = False
         self.webhook_set = False
         self.updates = []
@@ -95,7 +99,8 @@ class World:
         if host == "api.github.com":
             return self._github(request)
         if host == ICAL_HOST and self.calendar is not None:
-            return httpx.Response(200, content=self.calendar)
+            self.timeouts.append(request.extensions["timeout"])
+            return httpx.Response(self.calendar_status, content=self.calendar)
         if host == "127.0.0.1":
             return self._decider(request)
         self.unexpected.append(f"{request.method} {host}{path}")
@@ -118,6 +123,13 @@ class World:
         return httpx.Response(200, json={"ok": True, "result": True})
 
     def _github(self, request):
+        if self.github_raise is not None:
+            self.github_reads.append(request.url.path)
+            raise self.github_raise
+        if request.url.path in self.github_status:
+            self.github_reads.append(request.url.path)
+            return httpx.Response(self.github_status[request.url.path], json={"message": "made-up failure"})
+        self.timeouts.append(request.extensions["timeout"])
         if request.method != "GET":
             self.github_writes.append((request.method, str(request.url), request.headers.get("authorization")))
             return httpx.Response(201, json={})

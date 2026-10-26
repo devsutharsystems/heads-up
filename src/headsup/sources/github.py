@@ -2,6 +2,7 @@
 
 The HTTP client, store and clock are passed in, so tests run against httpx.MockTransport.
 Text from GitHub (titles, bodies) is untrusted data: it is only copied into Event fields.
+Timeouts: connect 10 s, read 15 s, one retry on a connect timeout only (headsup.netutil).
 Rate limits: when x-ratelimit-remaining reaches 0, or a 403/429 reports a limit, polling stops
 for this run and a warning is recorded; nothing sleeps or retries.
 """
@@ -9,6 +10,7 @@ for this run and a warning is recorded; nothing sleeps or retries.
 import hashlib
 from datetime import datetime, timedelta, timezone
 
+from headsup.netutil import TIMEOUT, with_connect_retry
 from headsup.schema import Event
 
 API = "https://api.github.com"
@@ -50,7 +52,8 @@ class GitHubSource:
             return None
         url = str(self.client.build_request("GET", API + path, params=params).url)
         etag = self.store.get_etag(url) if use_etag else None
-        resp = self.client.get(url, headers=self._headers(etag))
+        headers = self._headers(etag)
+        resp = with_connect_retry(lambda: self.client.get(url, headers=headers, timeout=TIMEOUT))
         remaining = resp.headers.get("x-ratelimit-remaining")
         limited = remaining == "0" or (resp.status_code in (403, 429) and
                                        (remaining == "0" or "retry-after" in resp.headers))

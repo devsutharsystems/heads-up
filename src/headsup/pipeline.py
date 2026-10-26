@@ -14,6 +14,7 @@ import httpx
 
 from headsup.actions import LABELS, buttons_for, new_token
 from headsup.dedupe import fresh
+from headsup.sources.ical import IcalError
 from headsup.state import build_input
 from headsup.telegram import TelegramError, WebhookConflict
 from headsup.writer import template_text
@@ -33,6 +34,8 @@ class App:
     policy: object
     writer: object
     sources: list = field(default_factory=list)  # [(name, source)]
+    unconfigured: list = field(default_factory=list)  # [(name, why)] sources that are not set up
+    key_missing: bool = False
     telegram: object = None
     actions: object = None
     write_repos: tuple = ()
@@ -132,17 +135,28 @@ def run_once(app):
                 f"{ollama_start_command(app.decider_host)}")
     if app.dry_run:
         app.out("dry-run: Telegram is not polled and nothing is sent or written")
+        app.out(app.writer.skipped)  # "Haiku skipped (dry-run)"
+        if app.key_missing:
+            app.out("note: no_api_key: ANTHROPIC_API_KEY is not set, so a real run would use template text")
     else:
         summary["taps"] = len(_process_taps(app, timeout=0))
         app.actions.sweep_expired()
         summary["sent"] += send_due_reminders(app) + retry_pending(app)
 
     events = []
-    for name, source in app.sources:
+    for name, why in app.unconfigured:
+        app.out(f"{name}: not configured ({why})")
+    for name, source in app.sources:  # one line per source, so a 0 is never ambiguous
+        seen_warnings = len(getattr(source, "warnings", []))
         try:
-            events += source.poll()
+            found = source.poll()
         except Exception as exc:  # noqa: BLE001 - one broken source must not stop the other
-            app.out(f"warning: {name} source failed: {type(exc).__name__}")  # class only: URLs can be secret
+            detail = f"{type(exc).__name__}: {exc}" if isinstance(exc, IcalError) else type(exc).__name__  # never a URL
+            app.out(f"{name}: error {detail}")
+            continue
+        events += found
+        warnings = getattr(source, "warnings", [])[seen_warnings:]
+        app.out(f"{name}: {len(found)} events" + (f" (warnings: {'; '.join(warnings)})" if warnings else ""))
     summary["collected"] = len(events)
     for event in fresh(sorted(events, key=lambda e: e.occurred_at), app.store):
         summary["new"] += 1

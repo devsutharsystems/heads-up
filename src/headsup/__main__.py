@@ -45,17 +45,22 @@ def parse_args(argv):
 
 
 def build_app(settings, *, client, anthropic_client, now, dry_run, out, store, sleep=time.sleep, monotonic=time.monotonic):
-    sources = []
+    sources, unconfigured = [], []
     if settings.github_repos:
         sources.append(("github", GitHubSource(settings.github_repos, client, store, token=settings.github_token, now=now)))
+    else:
+        unconfigured.append(("github", "GITHUB_REPOS is empty"))
     if settings.ical_url:
-        sources.append(("calendar", IcalSource(settings.ical_url, client, store, now=now, lead_minutes=settings.reminder_lead_minutes)))
+        sources.append(("ical", IcalSource(settings.ical_url, client, store, now=now, lead_minutes=settings.reminder_lead_minutes)))
+    else:
+        unconfigured.append(("ical", "ICAL_URL is not set"))
     if anthropic_client is None and settings.anthropic_api_key and not dry_run:
         anthropic_client = build_client(settings.anthropic_api_key)
     app = pipeline.App(
         store=store, client=client, decider=Decider(client, settings.decider_host, settings.decider_format),
         policy=Policy(store, settings.decider_threshold, now=now),
-        writer=Writer(anthropic_client, CostLog(store, now=now)), sources=sources,
+        writer=Writer(anthropic_client, CostLog(store, now=now), dry_run=dry_run), sources=sources,
+        unconfigured=unconfigured, key_missing=not settings.anthropic_api_key,
         write_repos=settings.github_write_repos, decider_host=settings.decider_host, dry_run=dry_run,
         now=now, out=out, sleep=sleep, monotonic=monotonic)
     if not dry_run:

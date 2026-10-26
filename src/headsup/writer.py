@@ -38,7 +38,7 @@ def template_text(event):
 
 
 class Writer:
-    def __init__(self, client, costlog, model=HAIKU_MODEL, prompt_path=PROMPT_PATH):
+    def __init__(self, client, costlog, model=HAIKU_MODEL, prompt_path=PROMPT_PATH, dry_run=False):
         if model != HAIKU_MODEL:
             raise ValueError(f"only {HAIKU_MODEL} is allowed")
         self.client = client
@@ -47,6 +47,9 @@ class Writer:
         self.prompt = Path(prompt_path).read_text(encoding="utf-8").rstrip("\n")
         self.error_flag = None  # {"reason": ..., "message": ...} once Haiku has been switched off
         self._failures = 0
+        self.skipped = "Haiku skipped (dry-run)" if dry_run else None  # not an error: a dry run never calls Haiku
+        if dry_run:
+            return
         if client is None:
             self._stop("no_api_key", "No Anthropic API key is configured; alerts use template text.")
 
@@ -64,7 +67,7 @@ class Writer:
         """Alert text for an interrupt decision. Returns None, with no API call, for anything else."""
         if decision.verdict != "interrupt":
             return None
-        if self.error_flag is not None:
+        if self.error_flag is not None or self.skipped:
             return Alert(template_text(event), "template")
         prompt = self.prompt.replace("{event}", build_input(event))
         try:

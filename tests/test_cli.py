@@ -20,7 +20,7 @@ def world(**kw):
 
 def run(argv, w, store, *, clock=None, haiku=None, out=None, cfg=None, **kw):
     out = [] if out is None else out
-    code = main(argv, settings=cfg or settings(), client=w.client, anthropic_client=haiku or FakeAnthropic(), now=clock or Clock(),
+    code = main(argv, settings=cfg or settings(), client=w.client, anthropic_client=FakeAnthropic() if haiku is None else (None if haiku is False else haiku), now=clock or Clock(),
                 out=out.append, store=store, sleep=lambda s: None, **kw)
     return code, out
 
@@ -178,8 +178,75 @@ def test_one_failing_source_does_not_stop_the_other_and_no_url_is_printed(tmp_pa
     out = []
     code = main(["--once"], settings=settings(), client=client, anthropic_client=FakeAnthropic(), now=Clock(), out=out.append,
                 store=store_at(tmp_path), sleep=lambda s: None)
-    assert code == 0 and any("calendar source failed: Boom" in line for line in out)
+    assert code == 0 and "ical: error Boom" in out
     assert not any("secret-address" in line for line in out) and any("collected 5" in line for line in out)
+
+
+# ---------------------------------------------------------------- per-source lines, dry-run wording, timeouts
+
+def test_every_run_prints_one_line_per_source(tmp_path):
+    w, store = world(), store_at(tmp_path)
+    _, out = run(["--once"], w, store)
+    assert "github: 5 events" in out and "ical: 1 events" in out
+    _, out2 = run(["--once"], w, store)
+    assert "github: 0 events" in out2 and "ical: 0 events" in out2  # a real, explained zero (304 and already reminded)
+
+
+def test_a_failing_source_shows_its_error_and_the_other_still_reports(tmp_path):
+    import httpx
+    w = world()
+    w.github_raise = httpx.ConnectTimeout("timed out")
+    _, out = run(["--once"], w, store_at(tmp_path))
+    assert "github: error ConnectTimeout" in out and "ical: 1 events" in out
+    assert len([p for p in w.github_reads]) == 2  # one retry on a connect timeout, then the error is reported
+
+
+def test_calendar_errors_show_the_message_but_never_the_address(tmp_path):
+    w = world()
+    w.calendar_status = 500
+    _, out = run(["--once"], w, store_at(tmp_path))
+    assert "ical: error IcalError: calendar fetch failed: HTTP 500" in out and "github: 5 events" in out
+    assert not any("secret-address" in line or "calendar.example.invalid" in line for line in out)
+
+
+def test_unconfigured_sources_are_reported_not_silent(tmp_path):
+    _, out = run(["--once"], world(), store_at(tmp_path), cfg=settings(github_repos=(), ical_url=None))
+    assert "github: not configured (GITHUB_REPOS is empty)" in out and "ical: not configured (ICAL_URL is not set)" in out
+    assert not any(line.startswith(("github: 0", "ical: 0")) for line in out)
+
+
+def test_github_warnings_are_shown_next_to_the_count(tmp_path):
+    w = world()
+    w.github_status[f"/repos/{REPO}/releases"] = 500
+    _, out = run(["--once"], w, store_at(tmp_path))
+    line = next(l for l in out if l.startswith("github: "))
+    assert line.startswith("github: 4 events (warnings: ") and "releases: HTTP 500" in line
+
+
+def test_dry_run_says_haiku_skipped_and_not_no_api_key(tmp_path, caplog):
+    w, store, out = world(), store_at(tmp_path), []
+    with caplog.at_level(logging.DEBUG):
+        run(["--once", "--dry-run"], w, store, out=out)  # settings() has an API key
+    assert "Haiku skipped (dry-run)" in out
+    assert not any("no_api_key" in line for line in out) and "no_api_key" not in caplog.text
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_no_api_key_is_shown_only_when_the_key_is_really_missing(tmp_path):
+    # dry run without a key: skipped AND a note that the key is missing
+    _, out = run(["--once", "--dry-run"], world(), store_at(tmp_path), cfg=settings(anthropic_api_key=None))
+    assert "Haiku skipped (dry-run)" in out and any("no_api_key" in line for line in out)
+    # real run without a key: template text and the flag for Dev
+    w = world()
+    _, out2 = run(["--once"], w, store_at(tmp_path / "b"), cfg=settings(anthropic_api_key=None), haiku=False)
+    assert len(w.sent()) == 3 and all("Heads up" not in p["text"] for p in w.sent())  # template text, not Haiku
+    assert any(line.startswith("WARNING: No Anthropic API key is configured") for line in out2)
+
+
+def test_github_and_calendar_requests_use_connect_10_read_15(tmp_path):
+    w = world()
+    run(["--once"], w, store_at(tmp_path))
+    assert w.timeouts and all(t == {"connect": 10.0, "read": 15.0, "write": 15.0, "pool": 15.0} for t in w.timeouts)
 
 
 def test_writer_errors_are_flagged_for_dev(tmp_path):
