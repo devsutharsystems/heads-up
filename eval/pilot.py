@@ -22,6 +22,8 @@ from pathlib import Path
 
 from eval.baseline_rules import decide
 from eval.gen_synthetic import Event
+from headsup.frozen import PROMPT_FILES, PromptFrozenError, load_frozen  # noqa: F401 (re-exported)
+from headsup.state import ahead_text as _ahead_text, build_input, time_phrase as _time_phrase  # noqa: F401 (re-exported)
 
 ROOT = Path(__file__).resolve().parent.parent
 EVAL = ROOT / "eval"
@@ -30,8 +32,6 @@ EVENTS_PATH = EVAL / "pilot_events.jsonl"
 RESULTS_PATH = EVAL / "pilot_results.jsonl"
 F3_CHECK_PATH = EVAL / "f3_check.json"
 COUNTER_PATH = EVAL / "haiku_call_counter.json"
-
-PROMPT_FILES = ["decider_F1.txt", "decider_F2.txt", "decider_F3.txt", "decider_F3_noul.txt", "haiku_decider.txt"]
 
 DECIDER_MODEL = "strands-decider:2b-mxfp8"
 DEFAULT_HOST = "127.0.0.1:11436"  # the spike's Ollama port
@@ -46,10 +46,6 @@ HAIKU_MAX_TOKENS = 8
 PRICE_IN = 0.10 / 1_000_000
 PRICE_OUT = 0.50 / 1_000_000
 CALL_CAP = 200
-
-
-class PromptFrozenError(Exception):
-    pass
 
 
 class CapReached(Exception):
@@ -74,56 +70,9 @@ def load_events(path=EVENTS_PATH):
     return events
 
 
-def _ahead_text(delta):
-    minutes = round(delta.total_seconds() / 60)
-    if minutes < 90:
-        return f"{minutes} min"
-    hours = minutes / 60
-    if hours < 36:
-        return f"{round(hours)} h"
-    return f"{round(hours / 24)} days"
-
-
-def _time_phrase(e):
-    if e.kind in ("ci_failed", "ci_recovered"):
-        return f"CI on branch {e.branch}"
-    if e.kind == "release_published":
-        return "just published"
-    if e.kind in ("pr_opened", "issue_opened"):
-        return "opened just now"
-    if e.kind == "event_upcoming":
-        if e.all_day:
-            return f"all-day on {e.start_time:%a}"
-        return f"starts in {_ahead_text(e.start_time - e.occurred_at)}"
-    if e.kind == "event_moved":
-        return f"moved, now starts in {_ahead_text(e.start_time - e.occurred_at)}"
-    if e.kind == "event_cancelled":
-        return f"cancelled, was due in {_ahead_text(e.start_time - e.occurred_at)}"
-    raise ValueError(f"unknown kind {e.kind!r}")
-
-
-def build_input(e):
-    """The one minimal input all three deciders see: source, kind, title, time phrase."""
-    return f"Source: {e.source}. Kind: {e.kind}. Title: {e.title}. When: {_time_phrase(e)}."
-
-
 # ---------------------------------------------------------------- frozen prompts
 
-def load_prompts(prompt_dir=PROMPT_DIR):
-    """Returns {file name: (text, sha256)}; refuses if any file differs from prompts.sha256."""
-    prompt_dir = Path(prompt_dir)
-    expected = {}
-    for line in (prompt_dir / "prompts.sha256").read_text().splitlines():
-        digest, name = line.split(None, 1)
-        expected[name.strip()] = digest
-    out = {}
-    for name in PROMPT_FILES:
-        data = (prompt_dir / name).read_bytes()
-        digest = hashlib.sha256(data).hexdigest()
-        if expected.get(name) != digest:
-            raise PromptFrozenError(f"{name} does not match prompts.sha256; frozen prompts must not change")
-        out[name] = (data.decode("utf-8").rstrip("\n"), digest)
-    return out
+load_prompts = load_frozen
 
 
 # ---------------------------------------------------------------- results file

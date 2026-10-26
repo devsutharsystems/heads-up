@@ -35,7 +35,10 @@ CREATE TABLE IF NOT EXISTS ci_state (
 
 
 def _iso(dt):
-    return None if dt is None else dt.isoformat()
+    """ISO-8601 in UTC (aware datetimes are converted; naive ones are assumed to be UTC already)."""
+    if dt is None:
+        return None
+    return (dt.astimezone(timezone.utc) if dt.tzinfo else dt).isoformat()
 
 
 def _now():
@@ -82,6 +85,11 @@ class Store:
             q, args = q + " WHERE event_id = ?", (event_id,)
         return self._db.execute(q + " ORDER BY id", args).fetchall()
 
+    def interrupts_between(self, start, end) -> int:
+        """Number of stored 'interrupt' decisions with start <= decided_at < end (aware datetimes)."""
+        rows = self._db.execute("SELECT decided_at FROM decisions WHERE verdict = 'interrupt'").fetchall()
+        return sum(1 for (t,) in rows if start <= datetime.fromisoformat(t) < end)
+
     # ----------------------------------------------------------------- taps
     def record_tap(self, callback_id, event_id, action, tapped_at=None) -> bool:
         """Idempotent on callback_id: a repeated tap returns False and changes nothing."""
@@ -105,6 +113,11 @@ class Store:
         if purpose is not None:
             q, args = q + " AND purpose = ?", args + [purpose]
         return self._db.execute(q, args).fetchone()[0]
+
+    def costs_between(self, start, end):
+        """[(purpose, cost_usd)] for cost rows with start <= at < end (aware datetimes)."""
+        rows = self._db.execute("SELECT at, purpose, cost_usd FROM cost_log").fetchall()
+        return [(p, c) for t, p, c in rows if start <= datetime.fromisoformat(t) < end]
 
     # ------------------------------------------------------- calendar starts
     def get_calendar_start(self, key):

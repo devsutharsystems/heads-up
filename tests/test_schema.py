@@ -29,3 +29,9 @@ def test_frozen_pilot_events_still_load():
 def test_decision_defaults():
     d = schema.Decision("e1", "log_only", "why", None)
     assert d.probability is None and d.threshold is None
+
+
+def test_build_input_lives_in_headsup_state_and_eval_imports_it_back():
+    from eval import pilot
+    from headsup import state
+    assert pilot.build_input is state.build_input
