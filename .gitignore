@@ -12,3 +12,4 @@ drafts/
 # spike leftovers
 spike/ollama_work/serve.log
 spike/ollama_work/*.orig
+.claude/settings.local.json
