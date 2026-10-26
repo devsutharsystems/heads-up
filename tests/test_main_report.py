@@ -188,6 +188,14 @@ def test_full_report_carries_the_required_caveats(full):
         assert phrase in text.replace("**", ""), phrase
 
 
+def test_full_report_has_the_process_caveat_worded_exactly(full):
+    expected = ("The selection (F2, threshold 0.40) was committed in edab690 before the Decider's test run. The Haiku test run happened before "
+                "that commit; Haiku is not tuned, so it could not affect the selection. The selection commit was delayed by the secrets hook; "
+                "the committed files are the snapshot staged before any test run, and --report re-verifies the selection from tune rows only.")
+    assert f"- {expected}" in full.report.read_text()
+    assert mr.PROCESS_CAVEAT == expected
+
+
 def test_full_report_spend_covers_this_run_and_the_total(full):
     text = full.report.read_text()
     assert "| this evaluation | 70 |" in text and "| pilot | 30 |" in text and "| total | 100 |" in text

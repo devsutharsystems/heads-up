@@ -233,8 +233,15 @@ def render_spend(this_run, pilot_part, counter_total, cap):
             f"{this_run['invalid']}; errors: {this_run['errors']}.", ""]
 
 
+PROCESS_CAVEAT = ("The selection (F2, threshold 0.40) was committed in edab690 before the Decider's test run. The Haiku test run happened "
+                  "before that commit; Haiku is not tuned, so it could not affect the selection. The selection commit was delayed by the "
+                  "secrets hook; the committed files are the snapshot staged before any test run, and --report re-verifies the selection "
+                  "from tune rows only.")
+
+
 def render_caveats(limitations_text):
     return ["## Caveats", "",
+            f"- {PROCESS_CAVEAT}",
             "- The data is synthetic and can inflate results (generated events are cleaner and easier to separate than real ones).",
             "- The labels were written by Dev and then checked by an AI coach against the written rubric (27 corrections accepted), "
             "before any decider was run. There is one labeller.",

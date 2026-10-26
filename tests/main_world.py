@@ -24,6 +24,7 @@ def tree(tmp_path):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(ROOT / rel, tmp_path / rel)
     shutil.copytree(ROOT / "eval" / "prompts", tmp_path / "eval" / "prompts")
+    (tmp_path / "eval" / "haiku_call_counter.json").write_text(json.dumps({"total": 30, "cap": 200}))  # the pilot's 30, whatever the real file says now
     return rm.Paths(tmp_path)
 
 
