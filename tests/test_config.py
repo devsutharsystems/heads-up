@@ -130,3 +130,9 @@ def test_env_loaded_in_one_place_and_never_logged(tmp_path, monkeypatch, capsys,
     for secret in (fake_key, fake_token, fake_ical):
         assert secret not in haystack
     test_dotenv_is_loaded_in_one_place_only()  # the source scan: one load_dotenv call site, no other env reads
+
+
+def test_the_real_env_file_can_never_be_loaded_by_tests():
+    import pytest
+    with pytest.raises(AssertionError, match="real .env"):
+        load_settings()  # the default path is the project's .env: the guard in conftest.py refuses it

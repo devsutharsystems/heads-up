@@ -6,7 +6,7 @@ day. Every event gets a stored Decision with the reason, so the decision log is 
 
 from datetime import datetime, timezone
 
-from headsup.localtime import day_bounds
+from headsup.localtime import LOCAL_TZ, day_bounds
 from headsup.schema import Decision
 
 DAILY_LIMIT = 5  # Dev's decision (PLAN.md): interrupts per local day (Asia/Kolkata)
@@ -42,6 +42,8 @@ class Policy:
             verdict, reason = "log_only", "decider unavailable: log only"
         elif not passes_threshold(probability, self.threshold):
             verdict, reason = "log_only", f"probability {probability:.2f} < threshold {self.threshold:.2f}{self._temp}"
+        elif (snooze := self.store.snooze_until()) is not None and now < snooze:  # snooze_1h button (learner part 3)
+            verdict, reason = "log_only", f"snoozed until {snooze.astimezone(LOCAL_TZ):%H:%M} local"
         elif self.interrupts_today(now) >= self.limit:  # LEARNER PART 2: the daily limit
             verdict, reason = "log_only", f"daily limit of {self.limit} interrupts reached"
         else:

@@ -1,0 +1,167 @@
+"""A fake outside world for Build 3 tests: one httpx.MockTransport that routes by host.
+No test using it opens a socket. Every value here is made up."""
+
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import httpx
+
+from headsup.config import Settings
+from headsup.store import Store
+
+GH = Path(__file__).parent / "fixtures" / "github"
+NOW = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
+CHAT = 424242
+BOT = "111222" + ":" + "FAKE-bot-token-for-tests"  # built at runtime so no scanner sees a token-shaped literal
+WRITE_TOKEN = "fake-actions-write-token"
+READ_TOKEN = "fake-read-token"
+REPO = "example-org/demo-repo"
+ICAL_HOST = "calendar.example.invalid"
+ICAL_URL = f"https://{ICAL_HOST}/secret-address-made-up/basic.ics"
+
+
+class Clock:
+    def __init__(self, now=NOW):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, **kw):
+        self.now += timedelta(**kw)
+
+
+def ics_for(start, title="Standup with the team"):
+    f = lambda d: d.strftime("%Y%m%dT%H%M%SZ")
+    return (f"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//made-up//tests//EN\r\nBEGIN:VEVENT\r\nUID:cal-1@example.invalid\r\n"
+            f"DTSTAMP:20261020T000000Z\r\nDTSTART:{f(start)}\r\nDTEND:{f(start + timedelta(hours=1))}\r\nSUMMARY:{title}\r\n"
+            f"END:VEVENT\r\nEND:VCALENDAR\r\n").encode()
+
+
+def gh(name):
+    return json.loads((GH / name).read_text())
+
+
+class World:
+    """Telegram, GitHub, the calendar host and the local Decider, all in memory."""
+
+    def __init__(self, scores=None, runs="runs_1.json", calendar=None):
+        self.scores = scores or {}
+        self.default_score = 0.1
+        self.runs = runs
+        self.calendar = calendar
+        self.decider_up = True
+        self.telegram_fails = False
+        self.webhook_set = False
+        self.updates = []
+        self.calls = []  # (method, payload) for every Telegram call
+        self.github_writes = []  # every non-GET request to a GitHub host
+        self.github_reads = []
+        self.decider_requests = []
+        self.unexpected = []
+        self.next_message_id = 100
+        self.client = httpx.Client(transport=httpx.MockTransport(self))
+
+    # ---- telegram helpers
+    def sent(self):
+        return [p for m, p in self.calls if m == "sendMessage"]
+
+    def methods(self):
+        return [m for m, _ in self.calls]
+
+    def token_for(self, message_index, action_label):
+        for row in self.sent()[message_index]["reply_markup"]["inline_keyboard"]:
+            for button in row:
+                if button["text"] == action_label:
+                    return button["callback_data"]
+        raise KeyError(action_label)
+
+    def message_id_of(self, index):
+        return 100 + index
+
+    def tap(self, token, *, chat=CHAT, sender=CHAT, message_id=100, update_id=None):
+        update_id = update_id or (len(self.updates) + 1)
+        self.updates.append({"update_id": update_id, "callback_query": {
+            "id": f"cq{update_id}", "from": {"id": sender}, "data": token,
+            "message": {"message_id": message_id, "chat": {"id": chat}}}})
+
+    # ---- routing
+    def __call__(self, request):
+        host, path = request.url.host, request.url.path
+        if host == "api.telegram.org":
+            return self._telegram(request)
+        if host == "api.github.com":
+            return self._github(request)
+        if host == ICAL_HOST and self.calendar is not None:
+            return httpx.Response(200, content=self.calendar)
+        if host == "127.0.0.1":
+            return self._decider(request)
+        self.unexpected.append(f"{request.method} {host}{path}")
+        raise AssertionError(f"unexpected request: {request.method} {host}{path}")
+
+    def _telegram(self, request):
+        method = request.url.path.rsplit("/", 1)[-1]
+        payload = json.loads(request.content or b"{}")
+        self.calls.append((method, payload))
+        if self.telegram_fails and method == "sendMessage":
+            return httpx.Response(500, json={"ok": False})
+        if method == "getUpdates":
+            if self.webhook_set:
+                return httpx.Response(409, json={"ok": False, "description": "webhook is set"})
+            offset = payload.get("offset", 0)
+            return httpx.Response(200, json={"ok": True, "result": [u for u in self.updates if u["update_id"] >= offset]})
+        if method == "sendMessage":
+            self.next_message_id += 1
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": self.next_message_id - 1}})
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    def _github(self, request):
+        if request.method != "GET":
+            self.github_writes.append((request.method, str(request.url), request.headers.get("authorization")))
+            return httpx.Response(201, json={})
+        self.github_reads.append(request.url.path)
+        base = f"/repos/{REPO}"
+        files = {base: "repo.json", f"{base}/releases": "releases.json", f"{base}/issues": "issues.json",
+                 f"{base}/pulls": "pulls.json", f"{base}/actions/runs": self.runs}
+        name = files[request.url.path]
+        etag = f'"{name}"'
+        if request.headers.get("if-none-match") == etag and name != "repo.json":
+            return httpx.Response(304, headers={"etag": etag})
+        return httpx.Response(200, headers={"etag": etag, "x-ratelimit-remaining": "4990"}, json=gh(name))
+
+    def _decider(self, request):
+        if request.url.path == "/":
+            if not self.decider_up:
+                raise httpx.ConnectError("refused")
+            return httpx.Response(200, text="Ollama is running")
+        if not self.decider_up:
+            raise httpx.ConnectError("refused")
+        body = json.loads(request.content)
+        self.decider_requests.append(body)
+        p = next((v for k, v in self.scores.items() if k in body["state"]), self.default_score)
+        return httpx.Response(200, json={"answers": {"interrupt": {"type": "noul", "noul": p}}})
+
+
+class FakeAnthropic:
+    def __init__(self, text="Heads up: take a look."):
+        self.text = text
+        self.calls = []
+        self.messages = self
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=self.text)],
+                               usage=SimpleNamespace(input_tokens=60, output_tokens=12), stop_reason="end_turn")
+
+
+def settings(**over):
+    base = dict(github_repos=(REPO,), github_write_repos=(REPO,), github_token=READ_TOKEN, github_actions_write_token=WRITE_TOKEN,
+                telegram_bot_token=BOT, telegram_chat_id=CHAT, ical_url=ICAL_URL, anthropic_api_key="fake-anthropic-key")
+    base.update(over)
+    return Settings(**base)
+
+
+def store_at(tmp_path):
+    return Store(tmp_path / "data" / "headsup.db")
