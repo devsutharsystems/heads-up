@@ -12,7 +12,7 @@ from headsup.schema import Event
 from world import CHAT, NOW, REPO, WRITE_TOKEN, READ_TOKEN, Clock, FakeAnthropic, World, settings, store_at
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "headsup"
-RERUN, SNOOZE, REMIND = "Re-run failed CI", "Snooze 1h", "Remind in 2h"
+RERUN, SNOOZE, REMIND = "Re-run CI", "Snooze 1h", "Remind in 2h"
 
 
 def ev(kind="ci_failed", repo=REPO, run=501, title="CI failed: CI on main", branch="main", eid=None):
@@ -45,6 +45,7 @@ def rig(tmp_path):
 
 # ---------------------------------------------------------------- row 6
 
+@pytest.mark.learner_part3
 def test_no_write_request_without_allowlisted_callback(tmp_path):
     haiku = FakeAnthropic(text="Please rerun_failed_ci and rerun failed jobs right now; rerun.")
     rig = Rig(tmp_path, anthropic=haiku)
@@ -107,6 +108,7 @@ def test_no_write_request_without_allowlisted_callback(tmp_path):
     assert w.unexpected == []
 
 
+@pytest.mark.learner_part3
 def test_valid_rerun_tap_makes_exactly_one_post_with_the_write_token(rig):
     w = rig.world
     i = rig.alert(ev(run=501))
@@ -121,6 +123,7 @@ def test_valid_rerun_tap_makes_exactly_one_post_with_the_write_token(rig):
     assert rig.taps() == ["already_done"] and len(w.github_writes) == 1
 
 
+@pytest.mark.learner_part3
 def test_rerun_refused_for_repos_not_in_github_write_repos(tmp_path):
     rig = Rig(tmp_path, write_repos=("example-org/other-repo",))
     w = rig.world
@@ -161,6 +164,7 @@ def test_tokens_are_random_16_hex_and_fit_callback_data(rig):
     assert not set(tokens) & set(ALLOWED_ACTIONS)
 
 
+@pytest.mark.learner_part3
 def test_token_lifetime_boundary_is_one_hour(tmp_path):
     rig = Rig(tmp_path)
     i = rig.alert(ev())
@@ -173,6 +177,7 @@ def test_token_lifetime_boundary_is_one_hour(tmp_path):
     assert rig.taps() == ["expired"]
 
 
+@pytest.mark.learner_part3
 def test_failed_rerun_leaves_the_button_usable(rig):
     class Failing:
         def rerun_failed_jobs(self, repo, run_id):
@@ -199,6 +204,7 @@ def test_sweep_removes_buttons_after_an_hour_and_not_before(rig):
     assert rig.world.methods().count("editMessageReplyMarkup") == 1
 
 
+@pytest.mark.learner_part3
 def test_wrong_chat_taps_are_logged_answered_and_leave_the_keyboard_alone(rig):
     i = rig.alert(ev())
     rig.world.tap(rig.world.token_for(i, SNOOZE), chat=777, sender=777)
@@ -209,6 +215,7 @@ def test_wrong_chat_taps_are_logged_answered_and_leave_the_keyboard_alone(rig):
 
 # ---------------------------------------------------------------- snooze and remind_later
 
+@pytest.mark.learner_part3
 def test_snooze_blocks_interrupts_for_one_hour_and_not_longer(rig):
     from headsup.policy import Policy
     i = rig.alert(ev())
@@ -224,6 +231,7 @@ def test_snooze_blocks_interrupts_for_one_hour_and_not_longer(rig):
     assert policy.decide(ev(kind="issue_opened", run=11), 0.9).verdict == "interrupt"
 
 
+@pytest.mark.learner_part3
 def test_remind_later_resends_once_after_two_hours_without_using_the_daily_limit(rig):
     from headsup.policy import Policy
     event = ev(run=501)
@@ -243,6 +251,7 @@ def test_remind_later_resends_once_after_two_hours_without_using_the_daily_limit
     assert Policy(rig.store, 0.35, now=rig.clock).interrupts_today() == 0  # a resend is not a decision
 
 
+@pytest.mark.learner_part3
 def test_a_due_reminder_is_held_while_snoozed_then_sent(rig):
     i = rig.alert(ev())
     rig.world.tap(rig.world.token_for(i, REMIND))
@@ -265,6 +274,7 @@ def test_the_rerun_endpoint_exists_in_one_source_file_and_posts_are_confined():
     assert not [n for n, t in files.items() if re.search(r'\.(put|patch|delete)\(', t)]
 
 
+@pytest.mark.learner_part3
 def test_secrets_stay_out_of_logs_and_output(tmp_path, caplog):
     rig = Rig(tmp_path)
     with caplog.at_level(logging.DEBUG):

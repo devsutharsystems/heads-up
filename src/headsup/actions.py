@@ -20,7 +20,7 @@ import httpx
 from headsup.telegram import TelegramError
 
 ALLOWED_ACTIONS = ("snooze_1h", "remind_later", "rerun_failed_ci")
-LABELS = {"snooze_1h": "Snooze 1h", "remind_later": "Remind in 2h", "rerun_failed_ci": "Re-run failed CI"}
+LABELS = {"snooze_1h": "Snooze 1h", "remind_later": "Remind in 2h", "rerun_failed_ci": "Re-run CI"}
 DONE_TEXT = {"snooze_1h": "Snoozed for 1 hour", "remind_later": "I'll remind you in 2 hours", "rerun_failed_ci": "Re-run requested"}
 TOKEN_TTL = timedelta(hours=1)  # Telegram states no button expiry (PLAN.md A5), so we enforce one
 SNOOZE_FOR = timedelta(hours=1)
@@ -134,6 +134,7 @@ class ActionHandler:
         token = data if isinstance(data, str) else None
         base = {"token": token, "chat_id": chat, "sender_id": sender}
 
+        # LEARNER PART 3 START
         if chat != self.chat_id or sender != self.chat_id:
             return self._refuse("wrong_chat", cq_id, **base)
         record = self.store.get_token(token) if token else None
@@ -170,6 +171,7 @@ class ActionHandler:
         self._safe(self.telegram.answer_callback, cq_id, DONE_TEXT[action])
         self._drop_keyboard(message_id)
         return "done"
+        # LEARNER PART 3 END
 
     def _drop_keyboard(self, message_id):
         if message_id is None:

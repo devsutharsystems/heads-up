@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from headsup.policy import DAILY_LIMIT, Policy, passes_threshold
 from headsup.schema import Event
 from headsup.store import Store
@@ -25,6 +27,7 @@ def make(tmp_path, now=NOON, threshold=0.35, note=None):
     return Policy(Store(tmp_path / "t.db"), threshold, now=clock, note=note), clock
 
 
+@pytest.mark.learner_part1
 def test_policy_interrupts_above_threshold_else_logs_only(tmp_path):
     p, _ = make(tmp_path)
     above = p.decide(ev(1), 0.50)
@@ -39,11 +42,13 @@ def test_policy_interrupts_above_threshold_else_logs_only(tmp_path):
     assert [r[:2] for r in p.store.decisions()] == [("e1", "interrupt"), ("e2", "interrupt"), ("e3", "log_only"), ("e4", "log_only")]
 
 
+@pytest.mark.learner_part1
 def test_passes_threshold_is_part_one_on_its_own():
     assert passes_threshold(0.35, 0.35) and passes_threshold(0.9, 0.35)
     assert not passes_threshold(0.349, 0.35) and not passes_threshold(None, 0.0)
 
 
+@pytest.mark.learner_part2
 def test_policy_stops_interrupting_after_five_per_day(tmp_path):
     p, clock = make(tmp_path)
     assert DAILY_LIMIT == 5
@@ -56,6 +61,7 @@ def test_policy_stops_interrupting_after_five_per_day(tmp_path):
     assert p.decide(ev(20), 0.9).verdict == "interrupt"
 
 
+@pytest.mark.learner_part2
 def test_daily_limit_resets_at_local_midnight_not_utc_midnight(tmp_path):
     # Asia/Kolkata midnight is 18:30 UTC.
     before = datetime(2026, 11, 2, 18, 29, tzinfo=timezone.utc)
@@ -68,6 +74,7 @@ def test_daily_limit_resets_at_local_midnight_not_utc_midnight(tmp_path):
     assert p.interrupts_today() == 1
 
 
+@pytest.mark.learner_part2
 def test_below_threshold_events_do_not_count_toward_the_limit(tmp_path):
     p, _ = make(tmp_path)
     for i in range(10):
@@ -76,6 +83,7 @@ def test_below_threshold_events_do_not_count_toward_the_limit(tmp_path):
     assert p.decide(ev(99), 0.9).verdict == "interrupt"
 
 
+@pytest.mark.learner_part1
 def test_the_reason_says_where_the_threshold_came_from_when_it_is_the_chosen_one(tmp_path):
     from headsup.config import CHOSEN_NOTE
     p, _ = make(tmp_path, threshold=0.40, note=CHOSEN_NOTE)

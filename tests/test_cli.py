@@ -81,7 +81,7 @@ def test_once_end_to_end_collect_dedupe_decide_write_send_then_taps(tmp_path):
     assert len(sent) == 3 and {p["chat_id"] for p in sent} == {CHAT} and all("parse_mode" not in p for p in sent)
     assert all(p["text"] == "Heads up: take a look." for p in sent)
     labels = [[b["text"] for b in p["reply_markup"]["inline_keyboard"][0]] for p in sent]
-    assert sum("Re-run failed CI" in row for row in labels) == 1 and all(row[:2] == ["Snooze 1h", "Remind in 2h"] for row in labels)
+    assert sum("Re-run CI" in row for row in labels) == 1 and all(row[:2] == ["Snooze 1h", "Remind in 2h"] for row in labels)
     assert w.github_writes == []
 
     # A second pass sees nothing new: ETags answer 304, the calendar reminder was given, nothing is sent twice

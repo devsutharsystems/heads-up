@@ -13,12 +13,14 @@ DAILY_LIMIT = 5  # Dev's decision (PLAN.md): interrupts per local day (Asia/Kolk
 
 
 def passes_threshold(probability, threshold):
+    # LEARNER PART 1 START
     """LEARNER PART 1: the interrupt decision.
 
     True only when the Decider answered and probability >= threshold. No answer (None) is never
     an interrupt: the Decider being down means log only, not a blind alert.
     """
     return probability is not None and probability >= threshold
+    # LEARNER PART 1 END
 
 
 class Policy:
@@ -43,6 +45,12 @@ class Policy:
         self.store.record_decision(decision)
         return decision
 
+    def under_daily_limit(self, now):
+        # LEARNER PART 2 START
+        """LEARNER PART 2: the daily limit. True while fewer than `self.limit` interrupts are stored for the local day."""
+        return self.interrupts_today(now) < self.limit
+        # LEARNER PART 2 END
+
     def decide(self, event, probability):
         now = self._now()
         if probability is None:
@@ -51,7 +59,7 @@ class Policy:
             verdict, reason = "log_only", f"probability {probability:.2f} < threshold {self.threshold:.2f}{self._note}"
         elif (snooze := self.store.snooze_until()) is not None and now < snooze:  # snooze_1h button (learner part 3)
             verdict, reason = "log_only", f"snoozed until {snooze.astimezone(LOCAL_TZ):%H:%M} local"
-        elif self.interrupts_today(now) >= self.limit:  # LEARNER PART 2: the daily limit
+        elif not self.under_daily_limit(now):  # LEARNER PART 2: the daily limit
             verdict, reason = "log_only", f"daily limit of {self.limit} interrupts reached"
         else:
             verdict, reason = "interrupt", f"probability {probability:.2f} >= threshold {self.threshold:.2f}{self._note}"

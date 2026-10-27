@@ -200,17 +200,17 @@ The numbering follows `PLAN.md`. Row 2 (a web-page watcher) is out of scope for 
 
 ## 8. For learners
 
-A `starter` branch is planned (**pending Prateek's OK; not created yet**). It will be this repository with three parts left blank, each with a guiding test that fails until you fill it in:
+The `starter` branch is this repository with three parts left blank (**publishing it is pending Prateek's OK**). Create it with `tools/make_starter.py` on the `starter` branch; the steps, the test command for each part and what "done" looks like are in [`LEARNERS.md`](LEARNERS.md). Each part has guiding tests that fail until you fill it in:
 
 1. the interrupt decision (`policy.py`);
 2. the daily limit of 5 (`policy.py`);
 3. tap-to-approve (`actions.py`).
 
-A second exercise: label 30 to 50 of your own events with the rubric in `eval/rubric.md`, then compare your labels with the three deciders.
+A second exercise: label 30 to 50 of your own events with the rubric in `eval/rubric.md`, then compare your labels with the Decider's verdicts (`LEARNERS.md`).
 
 ## 9. Licence and credits
 
-- **Licence: MIT** (**pending Prateek's OK; the `LICENSE` file has not been added yet**).
+- **Licence: MIT** (see [`LICENSE`](LICENSE)).
 - **Strands Decider** by Strands Agents, Apache-2.0: the model behind the interrupt decision. This project uses it through Ollama's third-party build.
 - **Ollama**: serves the Decider on your laptop. Its licence is UNVERIFIED in `PLAN.md`.
 - Libraries: httpx, icalendar, recurring-ical-events (LGPL-3.0-or-later, used as a normal pip dependency), the Anthropic SDK and python-dotenv. Licences for each are listed in `PLAN.md` section 6; python-dotenv's is UNVERIFIED there.
