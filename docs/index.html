@@ -119,7 +119,9 @@
   <li>Tapping "Re-run failed CI" re-ran the job: GitHub shows attempt #2 on the same run.</li>
   <li>The re-run failed again and correctly produced no new alert.</li>
   <li>A second test the same morning confirmed the other case live: after tapping Re-run, the re-run passed and the next run logged it as a recovery.</li>
+  <li>Calendar alerts verified live: a 'Team sync' starting in 14 min scored 0.40 and was sent; tapping Snooze 1h worked.</li>
 </ul>
+<p>The Decider seemed to rate meetings by how soon they start, not by what they are: in the same run, 'Client demo' (about 19 min away) scored 0.36 and was only logged, below 'Team sync' (14 min, 0.40). Only a handful of data points, so this is a pattern to test, not a result.</p>
 <p><strong>Haiku was off during the live run</strong>, so the alerts used template text, because the API key was being replaced.</p>
 
 <h2 id="screens">Screenshots</h2>
@@ -144,6 +146,7 @@
   <li><strong>Tested only on an Apple M2 with 8 GB of memory.</strong></li>
   <li><strong>Memory on 8 GB:</strong> the official weights pushed the Mac into swap; Ollama's MXFP8 build peaked at about 3.3 GB with no swap on a clean Mac, but with heavy apps open a model load still pushed about 2 GB to swap.</li>
   <li><strong>Floating iCal times (with no time zone) are read as UTC.</strong></li>
+  <li><strong>Next version: calendar buttons.</strong> Snooze 1h and Remind in 2h make little sense for a meeting starting in minutes; calendar alerts need their own buttons (for example, remind 5 minutes before).</li>
   <li><strong>Private chats only.</strong> The bot is meant for a one-to-one chat. Taps from any chat other than the configured one are ignored. <strong>UNVERIFIED:</strong> whether the code rejects a group chat by its type.</li>
   <li><strong><code>--dry-run</code> skips Haiku</strong>, so a dry run shows template text, not Haiku's wording.</li>
   <li><strong>Telegram 429 (rate limit) is not specially handled.</strong> It is raised as an error with no waiting; an alert that fails to send stays pending and is retried on the next run.</li>

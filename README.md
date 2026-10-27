@@ -154,6 +154,9 @@ On the 7 test days, the limit of 5 never caused a miss.
 - Tapping "Re-run failed CI" re-ran the job: GitHub shows attempt #2 on the same run.
 - The re-run failed again and correctly produced no new alert.
 - A second test the same morning confirmed the other case live: after tapping Re-run, the re-run passed and the next run logged it as a recovery.
+- Calendar alerts verified live: a 'Team sync' starting in 14 min scored 0.40 and was sent; tapping Snooze 1h worked.
+
+The Decider seemed to rate meetings by how soon they start, not by what they are: in the same run, 'Client demo' (about 19 min away) scored 0.36 and was only logged, below 'Team sync' (14 min, 0.40). Only a handful of data points, so this is a pattern to test, not a result.
 
 **Haiku was off during the live run**, so the alerts used template text, because the API key was being replaced.
 
@@ -186,6 +189,7 @@ The numbering follows `PLAN.md`. Row 2 (a web-page watcher) is out of scope for 
 - **Tested only on an Apple M2 with 8 GB of memory.**
 - **Memory on 8 GB:** the official weights pushed the Mac into swap; Ollama's MXFP8 build peaked at about 3.3 GB with no swap on a clean Mac, but with heavy apps open a model load still pushed about 2 GB to swap (`spike/SPIKE_REPORT.md`).
 - **Floating iCal times (with no time zone) are read as UTC.**
+- **Next version: calendar buttons.** Snooze 1h and Remind in 2h make little sense for a meeting starting in minutes; calendar alerts need their own buttons (for example, remind 5 minutes before).
 - **Private chats only.** The bot is meant for a one-to-one chat. Taps from any chat other than the configured one are ignored. **UNVERIFIED:** whether the code rejects a group chat by its type.
 - **`--dry-run` skips Haiku**, so a dry run shows template text, not Haiku's wording.
 - **Telegram 429 (rate limit) is not specially handled.** It is raised as an error with no waiting; an alert that fails to send stays pending and is retried on the next run.
