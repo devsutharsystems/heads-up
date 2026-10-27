@@ -14,12 +14,10 @@ DAILY_LIMIT = 5  # Dev's decision (PLAN.md): interrupts per local day (Asia/Kolk
 
 def passes_threshold(probability, threshold):
     # LEARNER PART 1 START
-    """LEARNER PART 1: the interrupt decision.
-
-    True only when the Decider answered and probability >= threshold. No answer (None) is never
-    an interrupt: the Decider being down means log only, not a blind alert.
+    """LEARNER PART 1: Return True only when the Decider answered and probability >= threshold.
+    No answer (None) is never an interrupt: the Decider being down means log only.
     """
-    return probability is not None and probability >= threshold
+    raise NotImplementedError("LEARNER PART 1: the interrupt decision (passes_threshold)")
     # LEARNER PART 1 END
 
 
@@ -47,8 +45,10 @@ class Policy:
 
     def under_daily_limit(self, now):
         # LEARNER PART 2 START
-        """LEARNER PART 2: the daily limit. True while fewer than `self.limit` interrupts are stored for the local day."""
-        return self.interrupts_today(now) < self.limit
+        """LEARNER PART 2: Return True while fewer than self.limit interrupts are stored for the local day.
+        Hint: self.interrupts_today(now) already counts them.
+        """
+        raise NotImplementedError("LEARNER PART 2: the daily limit (under_daily_limit)")
         # LEARNER PART 2 END
 
     def decide(self, event, probability):

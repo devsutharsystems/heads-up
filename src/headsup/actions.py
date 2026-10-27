@@ -135,42 +135,12 @@ class ActionHandler:
         base = {"token": token, "chat_id": chat, "sender_id": sender}
 
         # LEARNER PART 3 START
-        if chat != self.chat_id or sender != self.chat_id:
-            return self._refuse("wrong_chat", cq_id, **base)
-        record = self.store.get_token(token) if token else None
-        if record is None or record["message_id"] != message_id:
-            return self._refuse("unknown_token", cq_id, **base)
-        action, event_hash, now = record["action"], record["event_hash"], self._now()
-        event = self.store.get_event(event_hash)
-        base.update(event_id=event.id if event else None, action=action)
-        if action not in ALLOWED_ACTIONS or event is None:
-            return self._refuse("not_allowed", cq_id, **base)
-        if now - record["created_at"] > TOKEN_TTL:
-            self._drop_keyboard(message_id)
-            return self._refuse("expired", cq_id, **base)
-        if self.store.has_tap(event.id, action):
-            self._drop_keyboard(message_id)
-            self.store.log_tap("already_done", at=now, **base)
-            self._safe(self.telegram.answer_callback, cq_id, "Already done")
-            return "already_done"
-
-        if action == "snooze_1h":
-            self.store.set_snooze_until(now + SNOOZE_FOR)
-        elif action == "remind_later":
-            self.store.add_reminder(event_hash, now + REMIND_AFTER)
-        elif action == "rerun_failed_ci":
-            target = rerun_target(event, self.write_repos)
-            if target is None:
-                return self._refuse("refused_repo", cq_id, **base)
-            if not self.writer.rerun_failed_jobs(*target):
-                self.store.log_tap("failed", at=now, **base)  # nothing happened: the button stays usable until it expires
-                self._safe(self.telegram.answer_callback, cq_id, "GitHub did not accept the re-run")
-                return "failed"
-        self.store.record_tap(token, event.id, action, now)
-        self.store.log_tap("done", at=now, **base)
-        self._safe(self.telegram.answer_callback, cq_id, DONE_TEXT[action])
-        self._drop_keyboard(message_id)
-        return "done"
+        """LEARNER PART 3: Decide what one Telegram tap may do, then do it. Refuse and log (self._refuse) a tap from the wrong chat or
+        sender, an unknown token, an action outside ALLOWED_ACTIONS, a token older than TOKEN_TTL; answer
+        'already_done' for a repeated (event, action). Otherwise act (snooze, remind, or the one GitHub re-run
+        through self.writer), record_tap, log_tap('done'), answer the callback, drop the keyboard, return 'done'.
+        """
+        raise NotImplementedError("LEARNER PART 3: tap-to-approve (handle_update)")
         # LEARNER PART 3 END
 
     def _drop_keyboard(self, message_id):
