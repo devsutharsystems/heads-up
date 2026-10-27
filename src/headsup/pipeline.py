@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import httpx
 
 from headsup.actions import LABELS, buttons_for, new_token
+from headsup.ci_collapse import collapse_reasons
 from headsup.dedupe import fresh
 from headsup.sources.ical import IcalError
 from headsup.state import build_input
@@ -158,10 +159,15 @@ def run_once(app):
         warnings = getattr(source, "warnings", [])[seen_warnings:]
         app.out(f"{name}: {len(found)} events" + (f" (warnings: {'; '.join(warnings)})" if warnings else ""))
     summary["collected"] = len(events)
-    for event in fresh(sorted(events, key=lambda e: e.occurred_at), app.store):
+    batch = fresh(sorted(events, key=lambda e: e.occurred_at), app.store)
+    collapsed = collapse_reasons(batch, app.store)  # repeated or superseded CI failures: logged only, no Decider call
+    for event in batch:
         summary["new"] += 1
-        probability = app.decider.score(event) if up else None
-        decision = app.policy.decide(event, probability)
+        if event.content_hash in collapsed:
+            decision = app.policy.log_only(event, collapsed[event.content_hash])
+        else:
+            probability = app.decider.score(event) if up else None
+            decision = app.policy.decide(event, probability)
         summary[decision.verdict] += 1
         app.out(f"{decision.verdict}: {event.kind} {event.title!r} ({decision.reason})")
         if decision.verdict != "interrupt":

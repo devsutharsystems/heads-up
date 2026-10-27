@@ -36,6 +36,13 @@ class Policy:
         start, end = day_bounds(now or self._now())
         return self.store.interrupts_between(start, end)
 
+    def log_only(self, event, reason):
+        """Record a log_only decision decided outside the threshold (for example a collapsed CI failure)."""
+        decision = Decision(event_id=event.id, verdict="log_only", reason=reason, decided_at=self._now(),
+                            probability=None, threshold=self.threshold)
+        self.store.record_decision(decision)
+        return decision
+
     def decide(self, event, probability):
         now = self._now()
         if probability is None:

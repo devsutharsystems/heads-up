@@ -87,15 +87,27 @@ class Store:
         self._db.commit()
         return cur.rowcount == 1
 
-    def get_event(self, event_hash):
-        row = self._db.execute("SELECT event_json FROM seen_events WHERE content_hash = ?", (event_hash,)).fetchone()
-        if row is None:
-            return None
-        d = json.loads(row[0])
+    @staticmethod
+    def _event_from_json(text):
+        d = json.loads(text)
         for k in ("occurred_at", "fetched_at", "start_time"):
             if d[k] is not None:
                 d[k] = datetime.fromisoformat(d[k])
         return Event(**d)
+
+    def get_event(self, event_hash):
+        row = self._db.execute("SELECT event_json FROM seen_events WHERE content_hash = ?", (event_hash,)).fetchone()
+        return None if row is None else self._event_from_json(row[0])
+
+    def events_of_kind(self, kind):
+        rows = self._db.execute("SELECT event_json FROM seen_events WHERE kind = ?", (kind,)).fetchall()
+        return [self._event_from_json(r[0]) for r in rows]
+
+    def alerted_events(self, kind):
+        """Events of `kind` that have an alert row (sent or still pending)."""
+        rows = self._db.execute("SELECT s.event_json FROM seen_events s JOIN alerts a ON a.event_hash = s.content_hash "
+                                "WHERE s.kind = ?", (kind,)).fetchall()
+        return [self._event_from_json(r[0]) for r in rows]
 
     def seen_count(self) -> int:
         return self._db.execute("SELECT COUNT(*) FROM seen_events").fetchone()[0]

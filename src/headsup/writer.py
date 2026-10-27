@@ -34,7 +34,10 @@ class Alert:
 
 
 def template_text(event):
-    return f"{LABELS[event.kind]}: {event.title}. {time_phrase(event)}."
+    label = LABELS[event.kind]
+    title = event.title if event.title.startswith(f"{label}: ") else f"{label}: {event.title}"  # CI titles carry the label
+    phrase = time_phrase(event)
+    return f"{title}. {phrase[:1].upper()}{phrase[1:]}."
 
 
 class Writer:
