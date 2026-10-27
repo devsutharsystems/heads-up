@@ -2,6 +2,10 @@
 
 A proactive assistant that interrupts you only when it matters.
 
+[![tests](https://github.com/devsutharsystems/heads-up/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/devsutharsystems/heads-up/actions/workflows/tests.yml)
+
+Project page: <https://devsutharsystems.github.io/heads-up/> (**live after the repo is public**)
+
 ![A real alert: CI failed on main in the sandbox, with the three allowed actions](docs/screenshot-alert.png)
 
 *A real alert: CI failed on main in the sandbox, with the three allowed actions.*
