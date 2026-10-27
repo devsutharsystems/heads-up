@@ -187,16 +187,19 @@ def run_once(app):
 
 
 def listen(app, minutes):
-    """Long-poll button taps for `minutes` (the demo mode). Returns 0, or 1 if a webhook blocks polling."""
+    """Long-poll button taps for `minutes` (the demo mode). Returns 0 (also after Ctrl-C), or 1 if a webhook blocks polling."""
     if app.dry_run:
         app.out("dry-run: listening needs Telegram; nothing to do")
         return 0
     end = app.monotonic() + minutes * 60
-    while (remaining := end - app.monotonic()) > 0:
-        try:
-            _process_taps(app, timeout=max(1, int(min(30, remaining))))
-        except WebhookConflict:
-            return 1
-        app.actions.sweep_expired()
-        send_due_reminders(app)
+    try:
+        while (remaining := end - app.monotonic()) > 0:
+            try:
+                _process_taps(app, timeout=max(1, int(min(30, remaining))))
+            except WebhookConflict:
+                return 1
+            app.actions.sweep_expired()
+            send_due_reminders(app)
+    except KeyboardInterrupt:  # Ctrl-C is the normal way to stop early: one line, exit code 0, no traceback
+        app.out("stopped listening")
     return 0

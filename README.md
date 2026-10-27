@@ -2,8 +2,14 @@
 
 A proactive assistant that interrupts you only when it matters.
 
-> **[SCREENSHOT PLACEHOLDER: a Telegram alert with its buttons. Add `docs/screenshot-alert.png` and link it here.]**
->
+![A real alert: CI failed on main in the sandbox, with the three allowed actions](docs/screenshot-alert.png)
+
+*A real alert: CI failed on main in the sandbox, with the three allowed actions.*
+
+![After tapping Re-run failed CI: GitHub shows Re-run triggered and attempt #2](docs/screenshot-rerun.png)
+
+*After tapping Re-run failed CI: GitHub shows Re-run triggered and attempt #2.*
+
 > **[DEMO VIDEO PLACEHOLDER: add the link here.]**
 
 ## 1. What it is
@@ -126,6 +132,26 @@ On the 7 test days, the limit of 5 never caused a miss.
 **Pilot (before building).** 30 synthetic events over 3 days. The pre-set go/no-go rule gave GO: the best qualifying Decider point reached recall 0.80 at a threshold chosen on those same 30 events, so optimistic (rules 0.70; no winner on 30 events). Haiku caught 3 of 10 with no false alarms.
 
 **Real Haiku spend.** $0.001498 in total, 100 of the 200 allowed calls ($0.000443 pilot, $0.001055 main test), taken from the API usage fields times the listed price.
+
+## First live run (27 Oct 2026)
+
+**What happened.** The first real run watched `strands-labs/strands-decider` plus my sandbox repo. One workflow on a feature branch had failed 5 times overnight while the laptop was off. Heads-Up sent 5 identical alerts, each scored 0.44. They used the whole daily limit of 5 and blocked a more important failure of the sandbox CI on main, which scored 0.49.
+
+**Fixes.** The Decider, the threshold and the order in which the daily limit is applied were not changed.
+- Repeated failures of the same repo, workflow and branch now give one alert until they recover.
+- Failures that already recovered are logged only.
+- Old successes are no longer reported as recoveries.
+- A re-run is tracked by its attempt number.
+
+**Still true.** The Decider scored that feature-branch failure above the threshold, which is a false alarm by my rubric. Meeting reminders scored close to the threshold (0.37 and 0.38 in that first run). The synthetic evaluation does not show either problem.
+
+**Verified live after the fixes.**
+- One sandbox CI failure produced one alert.
+- Tapping "Re-run failed CI" re-ran the job: GitHub shows attempt #2 on the same run.
+- The re-run failed again and correctly produced no new alert.
+- A second test the same morning confirmed the other case live: after tapping Re-run, the re-run passed and the next run logged it as a recovery.
+
+**Haiku was off during the live run**, so the alerts used template text, because the API key was being replaced.
 
 ## 5. Requirements traceability
 

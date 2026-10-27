@@ -283,6 +283,19 @@ def test_listen_long_polls_handles_taps_and_stops_after_the_time(tmp_path):
     assert polls and all(1 <= p["timeout"] <= 30 for p in polls)
 
 
+def test_ctrl_c_while_listening_stops_with_one_line_and_exit_code_0(tmp_path, monkeypatch, capsys):
+    w, store = world(), store_at(tmp_path)
+
+    def interrupted(request):
+        raise KeyboardInterrupt  # what Ctrl-C raises inside the long poll
+
+    monkeypatch.setattr(w, "_telegram", interrupted)
+    ticks = iter(range(0, 1000, 20))
+    code, out = run(["--listen", "10"], w, store, monotonic=lambda: next(ticks))
+    assert code == 0 and out == ["stopped listening"]
+    assert "Traceback" not in "".join(capsys.readouterr())
+
+
 def test_listen_stops_with_a_clear_message_when_a_webhook_is_set(tmp_path):
     w, store = world(), store_at(tmp_path)
     w.webhook_set = True
