@@ -135,7 +135,7 @@ def test_haiku_failure_falls_back_to_template_and_stops_calling(tmp_path):
     w, _ = make(tmp_path, client)
     assert w.compose(INTERRUPT, ev()).source == "template" and w.error_flag is None
     assert w.compose(INTERRUPT, ev()).source == "template"
-    assert w.error_flag["reason"] == "repeated_failures" and "Prateek" in w.error_flag["message"]
+    assert w.error_flag["reason"] == "repeated_failures" and w.error_flag["message"].endswith("Tell whoever owns this API key (do not work around the limit).")
     after = w.compose(INTERRUPT, ev())
     assert after.source == "template" and len(client.calls) == 2  # no third call
 

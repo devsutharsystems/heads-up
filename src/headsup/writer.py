@@ -64,7 +64,7 @@ class Writer:
         self._failures += 1
         if reason in ("auth", "quota") or self._failures >= FAILURES_TO_STOP:
             why = reason if reason in ("auth", "quota") else "repeated_failures"
-            self._stop(why, f"Haiku writer stopped ({why}): alerts now use template text. Tell Prateek.")
+            self._stop(why, f"Haiku writer stopped ({why}): alerts now use template text. Tell whoever owns this API key (do not work around the limit).")
 
     def compose(self, decision, event):
         """Alert text for an interrupt decision. Returns None, with no API call, for anything else."""

@@ -3,13 +3,15 @@
 The `starter` branch is Heads-Up with three parts left blank. You write them; the tests tell you when each one is right.
 Run every command from the project folder, with the virtual environment from the README.
 
-**Make the starter branch** (the maintainer does this once, on a branch called `starter`, never on `main`):
+**Get the starter branch:** `git switch starter`.
+
+**How the branch was made** (only needed if you want to rebuild it: run this on a branch called `starter`, never on `main`):
 
 ```sh
 python tools/make_starter.py
 ```
 
-It replaces the code between each pair of `# LEARNER PART n START` / `END` comments with a hint and
+The script replaces the code between each pair of `# LEARNER PART n START` / `END` comments with a hint and
 `raise NotImplementedError("LEARNER PART n: ...")`. Run it again and nothing changes. It refuses to run if a marker
 is missing or unbalanced, or if the checkout is on `main`.
 

@@ -123,7 +123,7 @@ All numbers come from [`eval/EVAL_REPORT.md`](eval/EVAL_REPORT.md) and [`eval/PI
 
 **Headline: the Decider scored higher than the rules on precision, recall and F1, but every gap is within the uncertainty. It is not proven better.** The only difference from the rules whose interval excludes zero is Haiku's precision (+0.517, interval 0.346 to 0.682), and that comes with lower recall (0.458 against 0.583) and only 11 alerts.
 
-**Two metrics asked for by Prateek** (limit of 5 alerts a day, test days):
+**Two metrics from the project brief (Let's Data Science)** (limit of 5 alerts a day, test days):
 
 | decider | share of sent alerts that were wanted | important events missed |
 |---|---|---|
@@ -204,7 +204,7 @@ The numbering follows `PLAN.md`. Row 2 (a web-page watcher) is out of scope for 
 
 ## 8. For learners
 
-The `starter` branch is this repository with three parts left blank (**publishing it is pending Prateek's OK**). Create it with `tools/make_starter.py` on the `starter` branch; the steps, the test command for each part and what "done" looks like are in [`LEARNERS.md`](LEARNERS.md). Each part has guiding tests that fail until you fill it in:
+The [`starter` branch](https://github.com/devsutharsystems/heads-up/tree/starter) is this repository with three parts left blank. Check it out and fill them in; the steps, the test command for each part and what "done" looks like are in [`LEARNERS.md`](LEARNERS.md). Each part has guiding tests that fail until you fill it in:
 
 1. the interrupt decision (`policy.py`);
 2. the daily limit of 5 (`policy.py`);
