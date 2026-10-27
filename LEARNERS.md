@@ -64,32 +64,37 @@ be zero write requests to GitHub.
 Everything should pass. Then run the secrets scan on the files you changed:
 `.venv/bin/detect-secrets-hook --baseline .secrets.baseline src/headsup/policy.py src/headsup/actions.py`.
 
-## Exercise: label 30 to 50 of your own events
+## Exercise: label the 30 pilot events yourself (about 30 minutes)
 
-The evaluation in this repo uses synthetic events labelled by one person. Try it with real ones.
+The evaluation in this repo uses synthetic events labelled by one person (Dev). Label the same 30 events yourself and see how the deciders look against your labels.
 
-1. Run Heads-Up for a few days on your own repos and calendar (`--once`), so that `data/headsup.db` fills up.
-2. Export 30 to 50 events with their Decider probability. This snippet writes `my_labels.csv` with an empty `label` column:
+1. Copy the blank sheet: `cp eval/learner_label_sheet.csv my_labels.csv`. It has the same 30 events and columns as the pilot sheet, with the `label` column empty.
+2. Read `eval/rubric.md` first. Write your own persona (who you are for these repos) at the top of your notes before you start. Do not open `eval/pilot_label_sheet.csv` or `eval/pilot_results.jsonl` until you are done: they hold Dev's labels and the deciders' answers.
+3. Fill in `label` for every row: **1** if waiting until evening would cause real harm or a missed commitment, **0** if it can wait. Use the rubric's tie-breaker (when unsure, label 0).
+4. Score your labels. This is offline: it reads the saved results in `eval/pilot_results.jsonl` and makes no API, Ollama or network call.
 
-   ```python
-   import csv, json, sqlite3
-   db = sqlite3.connect("file:data/headsup.db?mode=ro", uri=True)
-   rows = db.execute("SELECT event_id, event_json FROM seen_events ORDER BY first_seen_at DESC LIMIT 50").fetchall()
-   prob = dict(db.execute("SELECT event_id, probability FROM decisions"))
-   with open("my_labels.csv", "w", newline="") as f:
-       out = csv.writer(f)
-       out.writerow(["id", "source", "kind", "title", "probability", "label"])
-       for event_id, raw in rows:
-           e = json.loads(raw)
-           out.writerow([event_id, e["source"], e["kind"], e["title"], prob.get(event_id), ""])
+   ```sh
+   .venv/bin/python -m eval.score_my_labels my_labels.csv
    ```
 
-   Do not share the CSV or the database: titles can be private.
-3. Read `eval/rubric.md` first, then fill in `label` for every row: **1** if waiting until evening would cause real harm or a
-   missed commitment, **0** if it can wait. Use the rubric's tie-breaker (when unsure, label 0). Write your own persona
-   (who you are for these repos) at the top of your notes before you start. Do not look at the probability column while you label;
-   hide it if you can.
-4. Count, at a threshold of 0.40: true positives (label 1 and probability at least 0.40), false positives, and
-   false negatives. Precision is TP / (TP + FP), recall is TP / (TP + FN). Compare them with the main evaluation in
-   [`eval/EVAL_REPORT.md`](eval/EVAL_REPORT.md) and with the rules in `eval/baseline_rules.py`.
-5. Write down what you notice. With 30 to 50 events your numbers will be uncertain: say so, as the report does.
+   It prints precision, recall and F1 against your labels for the frozen rules, the Decider (formats F1, F2 and F3, at the threshold 0.40) and Haiku, and how many of your labels differ from Dev's. A blank or invalid label stops it with the row's id.
+5. Write down what you notice, for example which events you and Dev labelled differently. With 30 events your numbers are very uncertain: say so, as the report does. Compare with [`eval/EVAL_REPORT.md`](eval/EVAL_REPORT.md).
+
+### Optional extension: label 30 to 50 of your own real events
+
+Run Heads-Up for a few days on your own repos and calendar (`--once`), so that `data/headsup.db` fills up. Export 30 to 50 events with their Decider probability. This snippet writes `my_real_labels.csv` with an empty `label` column:
+
+```python
+import csv, json, sqlite3
+db = sqlite3.connect("file:data/headsup.db?mode=ro", uri=True)
+rows = db.execute("SELECT event_id, event_json FROM seen_events ORDER BY first_seen_at DESC LIMIT 50").fetchall()
+prob = dict(db.execute("SELECT event_id, probability FROM decisions"))
+with open("my_real_labels.csv", "w", newline="") as f:
+    out = csv.writer(f)
+    out.writerow(["id", "source", "kind", "title", "probability", "label"])
+    for event_id, raw in rows:
+        e = json.loads(raw)
+        out.writerow([event_id, e["source"], e["kind"], e["title"], prob.get(event_id), ""])
+```
+
+Do not share the CSV or the database: titles can be private. Label with the same rubric, without looking at the probability column. Then count, at a threshold of 0.40: true positives (label 1 and probability at least 0.40), false positives and false negatives. Precision is TP / (TP + FP), recall is TP / (TP + FN). Compare with the rules in `eval/baseline_rules.py`. The scorer above does not read this file.

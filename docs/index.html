@@ -112,7 +112,7 @@
   <li>Old successes are no longer reported as recoveries.</li>
   <li>A re-run is tracked by its attempt number.</li>
 </ul>
-<p><strong>Still true.</strong> The Decider scored that feature-branch failure above the threshold, which is a false alarm by my rubric. Meeting reminders scored close to the threshold (0.37 and 0.38 in that first run). The synthetic evaluation does not show either problem.</p>
+<p><strong>Still true.</strong> The Decider scored that feature-branch failure above the threshold, which is a false alarm by my rubric. Meeting reminders scored just under the threshold: the two recorded scores are 0.3704 (26 Oct, 16:19 UTC) and 0.3800 (27 Oct, 01:55 UTC), both logged only. A dry run on 26 Oct printed a meeting-reminder score of 0.40 in the terminal; it was printed, not stored, so there is no record of it. The synthetic evaluation does not show either problem.</p>
 <p><strong>Verified live after the fixes.</strong></p>
 <ul>
   <li>One sandbox CI failure produced one alert.</li>

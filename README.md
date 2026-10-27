@@ -147,7 +147,7 @@ On the 7 test days, the limit of 5 never caused a miss.
 - Old successes are no longer reported as recoveries.
 - A re-run is tracked by its attempt number.
 
-**Still true.** The Decider scored that feature-branch failure above the threshold, which is a false alarm by my rubric. Meeting reminders scored close to the threshold (0.37 and 0.38 in that first run). The synthetic evaluation does not show either problem.
+**Still true.** The Decider scored that feature-branch failure above the threshold, which is a false alarm by my rubric. Meeting reminders scored just under the threshold: the two recorded scores are 0.3704 (26 Oct, 16:19 UTC) and 0.3800 (27 Oct, 01:55 UTC), both logged only. A dry run on 26 Oct printed a meeting-reminder score of 0.40 in the terminal; it was printed, not stored, so there is no record of it. The synthetic evaluation does not show either problem.
 
 **Verified live after the fixes.**
 - One sandbox CI failure produced one alert.
@@ -210,7 +210,7 @@ The [`starter` branch](https://github.com/devsutharsystems/heads-up/tree/starter
 2. the daily limit of 5 (`policy.py`);
 3. tap-to-approve (`actions.py`).
 
-A second exercise: label 30 to 50 of your own events with the rubric in `eval/rubric.md`, then compare your labels with the Decider's verdicts (`LEARNERS.md`).
+A second exercise (about 30 minutes): label the 30 pilot events yourself in `eval/learner_label_sheet.csv` using the rubric in `eval/rubric.md`, then run `.venv/bin/python -m eval.score_my_labels <your sheet>`. It is offline and prints precision, recall and F1 against your labels for the rules, the Decider and Haiku, and how many of your labels differ from Dev's (`LEARNERS.md`). Optional extension: label 30 to 50 of your own real events over a few days.
 
 ## 9. Licence and credits
 
