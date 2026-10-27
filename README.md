@@ -2,6 +2,10 @@
 
 A proactive assistant that interrupts you only when it matters.
 
+[![tests](https://github.com/devsutharsystems/heads-up/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/devsutharsystems/heads-up/actions/workflows/tests.yml)
+
+Project page: <https://devsutharsystems.github.io/heads-up/> (**live after the repo is public**)
+
 ![A real alert: CI failed on main in the sandbox, with the three allowed actions](docs/screenshot-alert.png)
 
 *A real alert: CI failed on main in the sandbox, with the three allowed actions.*
@@ -119,7 +123,7 @@ All numbers come from [`eval/EVAL_REPORT.md`](eval/EVAL_REPORT.md) and [`eval/PI
 
 **Headline: the Decider scored higher than the rules on precision, recall and F1, but every gap is within the uncertainty. It is not proven better.** The only difference from the rules whose interval excludes zero is Haiku's precision (+0.517, interval 0.346 to 0.682), and that comes with lower recall (0.458 against 0.583) and only 11 alerts.
 
-**Two metrics asked for by Prateek** (limit of 5 alerts a day, test days):
+**Two metrics from the project brief (Let's Data Science)** (limit of 5 alerts a day, test days):
 
 | decider | share of sent alerts that were wanted | important events missed |
 |---|---|---|
@@ -143,7 +147,7 @@ On the 7 test days, the limit of 5 never caused a miss.
 - Old successes are no longer reported as recoveries.
 - A re-run is tracked by its attempt number.
 
-**Still true.** The Decider scored that feature-branch failure above the threshold, which is a false alarm by my rubric. Meeting reminders scored close to the threshold (0.37 and 0.38 in that first run). The synthetic evaluation does not show either problem.
+**Still true.** The Decider scored that feature-branch failure above the threshold, which is a false alarm by my rubric. Meeting reminders scored just under the threshold: the two recorded scores are 0.3704 (26 Oct, 16:19 UTC) and 0.3800 (27 Oct, 01:55 UTC), both logged only. A dry run on 26 Oct printed a meeting-reminder score of 0.40 in the terminal; it was printed, not stored, so there is no record of it. The synthetic evaluation does not show either problem.
 
 **Verified live after the fixes.**
 - One sandbox CI failure produced one alert.
@@ -200,13 +204,13 @@ The numbering follows `PLAN.md`. Row 2 (a web-page watcher) is out of scope for 
 
 ## 8. For learners
 
-The `starter` branch is this repository with three parts left blank (**publishing it is pending Prateek's OK**). Create it with `tools/make_starter.py` on the `starter` branch; the steps, the test command for each part and what "done" looks like are in [`LEARNERS.md`](LEARNERS.md). Each part has guiding tests that fail until you fill it in:
+The [`starter` branch](https://github.com/devsutharsystems/heads-up/tree/starter) is this repository with three parts left blank. Check it out and fill them in; the steps, the test command for each part and what "done" looks like are in [`LEARNERS.md`](LEARNERS.md). Each part has guiding tests that fail until you fill it in:
 
 1. the interrupt decision (`policy.py`);
 2. the daily limit of 5 (`policy.py`);
 3. tap-to-approve (`actions.py`).
 
-A second exercise: label 30 to 50 of your own events with the rubric in `eval/rubric.md`, then compare your labels with the Decider's verdicts (`LEARNERS.md`).
+A second exercise (about 30 minutes): label the 30 pilot events yourself in `eval/learner_label_sheet.csv` using the rubric in `eval/rubric.md`, then run `.venv/bin/python -m eval.score_my_labels <your sheet>`. It is offline and prints precision, recall and F1 against your labels for the rules, the Decider and Haiku, and how many of your labels differ from Dev's (`LEARNERS.md`). Optional extension: label 30 to 50 of your own real events over a few days.
 
 ## 9. Licence and credits
 

@@ -265,7 +265,7 @@ def test_writer_errors_are_flagged_for_dev(tmp_path):
     w, store = world(), store_at(tmp_path)
     code, out = run(["--once"], w, store, haiku=Broken())
     assert len(w.sent()) == 3 and all("CI failed" in p["text"] or ":" in p["text"] for p in w.sent())  # template text still sent
-    assert any(line.startswith("WARNING: Haiku writer stopped (auth)") and "Prateek" in line for line in out)
+    assert any(line.startswith("WARNING: Haiku writer stopped (auth)") and line.endswith("Tell whoever owns this API key (do not work around the limit).") for line in out)
 
 
 # ---------------------------------------------------------------- listen

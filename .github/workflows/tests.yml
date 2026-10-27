@@ -1,0 +1,34 @@
+name: tests
+
+# Only main. The starter branch fails its guiding tests on purpose, so it never runs this.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install the pinned dependencies from pyproject.toml
+        run: |
+          python - > requirements-ci.txt <<'PY'
+          import tomllib
+          project = tomllib.load(open("pyproject.toml", "rb"))["project"]
+          print("\n".join(project["dependencies"] + project["optional-dependencies"]["dev"]))
+          PY
+          python -m pip install -r requirements-ci.txt
+      - name: Tests (offline, no secrets needed)
+        run: python -m pytest -q
+      - name: Secrets scan
+        run: git ls-files -z -- . ':(exclude)docs/*.png' | xargs -0 detect-secrets-hook --baseline .secrets.baseline
