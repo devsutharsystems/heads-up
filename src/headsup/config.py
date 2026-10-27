@@ -1,10 +1,11 @@
 """The ONLY place that loads .env. Values are never logged or printed."""
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV = ROOT / ".env"
@@ -14,6 +15,12 @@ DEFAULT_ENV = ROOT / ".env"
 CHOSEN_FORMAT = "F2"
 CHOSEN_THRESHOLD = 0.40
 CHOSEN_NOTE = "chosen on tune days in the main evaluation (eval/EVAL_REPORT.md)"
+
+
+# Every setting name, as in .env.example (a test keeps the two in step).
+SETTING_NAMES = ("ANTHROPIC_API_KEY", "GITHUB_TOKEN", "GITHUB_REPOS", "GITHUB_WRITE_REPOS", "GITHUB_ACTIONS_WRITE_TOKEN",
+                 "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "ICAL_URL", "REMINDER_LEAD_MINUTES",
+                 "DECIDER_FORMAT", "DECIDER_THRESHOLD", "DECIDER_HOST")
 
 
 @dataclass(frozen=True)
@@ -32,8 +39,21 @@ class Settings:
     github_actions_write_token: str | None = field(default=None, repr=False)  # separate token, one repo, Actions: write
 
 
+def _shell_overrides(shell_values, env_path):
+    """Names set in the shell AND with a different non-empty value in the .env file. Names only: no value is returned."""
+    in_file = dotenv_values(env_path)
+    return [n for n in SETTING_NAMES
+            if shell_values.get(n) is not None and in_file.get(n) and in_file[n] != shell_values[n]]
+
+
 def load_settings(env_path=DEFAULT_ENV) -> Settings:
+    shell_values = {n: os.environ.get(n) for n in SETTING_NAMES}  # before load_dotenv; it never overrides these
     load_dotenv(env_path, override=False)
+    overridden = _shell_overrides(shell_values, env_path)
+    if overridden:
+        print(f"warning: {', '.join(overridden)} {'is' if len(overridden) == 1 else 'are'} set in your shell and in .env with "
+              "different values; the shell values override .env. Run in a fresh terminal (or unset them) to use .env.",
+              file=sys.stderr)
     repos = _repo_list(os.environ.get("GITHUB_REPOS"))
     return Settings(
         reminder_lead_minutes=_lead_minutes(os.environ.get("REMINDER_LEAD_MINUTES")),

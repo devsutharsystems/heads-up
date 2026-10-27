@@ -163,3 +163,44 @@ def test_conftest_clears_every_name_in_env_example_from_the_environment():
     names = _setting_names()
     assert len(names) == 12 and "ANTHROPIC_API_KEY" in names and "DECIDER_HOST" in names
     assert not [n for n in names if n in os.environ]
+
+
+def test_setting_names_match_env_example():
+    from headsup.config import SETTING_NAMES
+    import re
+    names = re.findall(r"^([A-Z][A-Z0-9_]*)=", (ROOT / ".env.example").read_text(), flags=re.MULTILINE)
+    assert list(SETTING_NAMES) == names
+
+
+def test_shell_values_that_differ_from_env_file_are_warned_by_name_only(tmp_path, monkeypatch, capsys):
+    shell_gh, file_gh = "shell-gh-" + "token-1", "file-gh-" + "token-2"
+    shell_tg, file_tg = "shell-tg-" + "token-3", "file-tg-" + "token-4"
+    shell_url, file_url = "https://shell.example.invalid/aa", "https://file.example.invalid/bb"
+    monkeypatch.setenv("GITHUB_TOKEN", shell_gh)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", shell_tg)
+    monkeypatch.setenv("ICAL_URL", shell_url)
+    monkeypatch.setenv("GITHUB_REPOS", "example-org/same")  # same value in both: no warning for it
+    monkeypatch.setenv("DECIDER_HOST", "127.0.0.1:11999")   # set in the shell only
+    env = tmp_path / ".env"
+    lines = [f"GITHUB_TOKEN={file_gh}", f"TELEGRAM_BOT_TOKEN={file_tg}", f"ICAL_URL={file_url}", "GITHUB_REPOS=" + "example-org/same",
+             "ANTHROPIC_API_KEY=", "DECIDER_FORMAT=F1"]  # built in parts so the secrets scanner sees no key-like literal
+    env.write_text("\n".join(lines) + "\n")
+    s = load_settings(env)
+    assert s.github_token == shell_gh  # the shell still wins, as before
+    seen = capsys.readouterr()
+    text = seen.out + seen.err
+    assert text.count("warning:") == 1 and text.count("\n") == 1
+    assert "GITHUB_TOKEN, TELEGRAM_BOT_TOKEN, ICAL_URL are set in your shell" in text and "override .env" in text
+    for value in (shell_gh, file_gh, shell_tg, file_tg, shell_url, file_url, "example-org", "11999", "F1"):
+        assert value not in text
+    for name in ("GITHUB_REPOS", "DECIDER_HOST", "DECIDER_FORMAT", "ANTHROPIC_API_KEY"):
+        assert name not in text
+
+
+def test_no_warning_when_nothing_conflicts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_TOKEN", "same-" + "value")
+    env = tmp_path / ".env"
+    env.write_text("GITHUB_TOKEN=same-value\nICAL_URL=https://file.example.invalid/x\n")
+    load_settings(env)
+    seen = capsys.readouterr()
+    assert (seen.out + seen.err) == ""
