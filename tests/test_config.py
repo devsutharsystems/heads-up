@@ -155,3 +155,11 @@ def test_the_old_temporary_label_is_gone_from_the_code_and_the_docs_we_ship():
     for rel in ("src/headsup/config.py", "src/headsup/policy.py", "src/headsup/__main__.py", ".env.example", "eval/main_report.py",
                 "eval/EVAL_REPORT.md"):
         assert "TEMPORARY" not in (ROOT / rel).read_text(), rel
+
+
+def test_conftest_clears_every_name_in_env_example_from_the_environment():
+    import os
+    from conftest import _setting_names
+    names = _setting_names()
+    assert len(names) == 12 and "ANTHROPIC_API_KEY" in names and "DECIDER_HOST" in names
+    assert not [n for n in names if n in os.environ]
