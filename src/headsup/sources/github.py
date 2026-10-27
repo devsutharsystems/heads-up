@@ -3,6 +3,8 @@
 The HTTP client, store and clock are passed in, so tests run against httpx.MockTransport.
 Text from GitHub (titles, bodies) is untrusted data: it is only copied into Event fields.
 Timeouts: connect 10 s, read 15 s, one retry on a connect timeout only (headsup.netutil).
+CI: failures and recoveries are tracked per (repo, workflow, branch); a recovery is a success newer than the last stored
+failure, including a later run_attempt of the same run id.
 Rate limits: when x-ratelimit-remaining reaches 0, or a 403/429 reports a limit, polling stops
 for this run and a warning is recorded; nothing sleeps or retries.
 """
@@ -114,12 +116,22 @@ class GitHubSource:
                 continue
             name = run.get("name") or run.get("display_title") or "workflow"
             when = _ts(run["updated_at"])
+            attempt = run.get("run_attempt") or 1
             is_default = None if default is None else branch == default
+            state = self.store.get_ci_run(repo, name, branch)  # (failed_at, open, recovered_at) or None
             if conclusion == "failure":
+                # Same run id on every attempt, so a re-run that fails again has the same content_hash: no second alert.
                 out.append(self._event(repo, "ci_failed", run["id"], f"CI failed: {name} on {branch}", run.get("display_title"),
                                        run["html_url"], when, branch=branch, is_default_branch=is_default))
-            elif self.store.get_ci_state(repo, branch) == "failure":
-                out.append(self._event(repo, "ci_recovered", run["id"], f"CI recovered: {name} on {branch}", run.get("display_title"),
+                if state is None or state[1]:  # new failing workflow, or still failing: remember the latest failing time
+                    self.store.set_ci_run(repo, name, branch, max(when, state[0]) if state else when, True)
+                elif when > state[2]:  # failed again after the recovery; an old failure replayed in the list changes nothing
+                    self.store.set_ci_run(repo, name, branch, when, True)
+            elif state is not None and state[1] and when > state[0]:
+                # A success NEWER than the last stored failure. A re-run attempt gets a key of its own so that a later
+                # recovery of the same run id is not mistaken for this one.
+                key = run["id"] if attempt == 1 else f"{run['id']}-a{attempt}"
+                out.append(self._event(repo, "ci_recovered", key, f"CI recovered: {name} on {branch}", run.get("display_title"),
                                        run["html_url"], when, branch=branch, is_default_branch=is_default))
-            self.store.set_ci_state(repo, branch, conclusion)
+                self.store.set_ci_run(repo, name, branch, state[0], False, when)
         return out

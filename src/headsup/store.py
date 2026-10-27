@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS calendar_reminded (key TEXT PRIMARY KEY, reminded_at 
 CREATE TABLE IF NOT EXISTS etags (url TEXT PRIMARY KEY, etag TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS ci_state (
     repo TEXT NOT NULL, branch TEXT NOT NULL, last_conclusion TEXT NOT NULL, PRIMARY KEY (repo, branch));
+CREATE TABLE IF NOT EXISTS ci_runs (
+    repo TEXT NOT NULL, workflow TEXT NOT NULL, branch TEXT NOT NULL, failed_at TEXT NOT NULL,
+    open INTEGER NOT NULL, recovered_at TEXT, PRIMARY KEY (repo, workflow, branch));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_button_taps_event_action ON button_taps (event_id, action);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS alerts (
@@ -285,4 +288,20 @@ class Store:
 
     def set_ci_state(self, repo, branch, conclusion):
         self._db.execute("INSERT OR REPLACE INTO ci_state VALUES (?,?,?)", (repo, branch, conclusion))
+        self._db.commit()
+
+    # ------------------------------------------- CI failures per (repo, workflow, branch)
+    def get_ci_run(self, repo, workflow, branch):
+        """(failed_at, is_open, recovered_at) for the key, or None. failed_at is the time of the last failing run seen;
+        is_open is True until a newer success was reported as the recovery."""
+        row = self._db.execute("SELECT failed_at, open, recovered_at FROM ci_runs WHERE repo = ? AND workflow = ? AND branch = ?",
+                               (repo, workflow, branch)).fetchone()
+        if row is None:
+            return None
+        return (datetime.fromisoformat(row[0]), bool(row[1]),
+                None if row[2] is None else datetime.fromisoformat(row[2]))
+
+    def set_ci_run(self, repo, workflow, branch, failed_at, is_open, recovered_at=None):
+        self._db.execute("INSERT OR REPLACE INTO ci_runs VALUES (?,?,?,?,?,?)",
+                         (repo, workflow, branch, _iso(failed_at), int(is_open), _iso(recovered_at)))
         self._db.commit()

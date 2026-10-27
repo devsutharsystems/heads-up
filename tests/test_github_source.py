@@ -106,3 +106,75 @@ def test_old_events_are_dropped(tmp_path):
     src, _ = make(tmp_path, FakeGitHub())
     src.max_age = timedelta(minutes=30)
     assert src.poll() == []
+
+
+# ---------------------------------------------------------------- recoveries and re-run attempts
+# GitHub's workflow-run object has id, name, run_attempt, conclusion, status, head_branch, updated_at:
+# https://docs.github.com/en/rest/actions/workflow-runs (whether the list shows every attempt is not stated there).
+
+def run(rid, conclusion, updated, attempt=1, branch="main", name="CI"):
+    return {"id": rid, "name": name, "display_title": "t", "head_branch": branch, "status": "completed", "conclusion": conclusion,
+            "run_attempt": attempt, "updated_at": updated, "html_url": f"https://example.invalid/{REPO}/actions/runs/{rid}"}
+
+
+class RunsGitHub(FakeGitHub):
+    """Like FakeGitHub, but the workflow runs come from a list the test changes between polls."""
+
+    def __init__(self, runs):
+        super().__init__()
+        self.run_list = runs
+
+    def __call__(self, request):
+        if request.url.path == f"/repos/{REPO}/actions/runs":
+            self.requests.append(request)
+            return httpx.Response(200, json={"total_count": len(self.run_list), "workflow_runs": self.run_list})
+        if request.url.path in (f"/repos/{REPO}/releases", f"/repos/{REPO}/issues", f"/repos/{REPO}/pulls"):
+            return httpx.Response(200, json=[])
+        return super().__call__(request)
+
+
+def ci_events(events):
+    return [(e.kind, e.id.rsplit(":", 1)[1]) for e in events if e.kind.startswith("ci_")]
+
+
+def test_an_old_success_before_a_stored_failure_is_not_a_recovery(tmp_path):
+    fake = RunsGitHub([run(900, "failure", "2026-11-02T10:00:00Z")])
+    src, store = make(tmp_path, fake)
+    assert ci_events(src.poll()) == [("ci_failed", "900")]
+    # the list now also holds a success from the day before, older than the stored failure
+    fake.run_list = [run(900, "failure", "2026-11-02T10:00:00Z"), run(850, "success", "2026-11-01T11:30:00Z")]
+    assert ci_events(src.poll()) == [("ci_failed", "900")]  # the failure again (it dedupes); no recovery
+    # a genuinely newer success is the recovery, once
+    fake.run_list.append(run(910, "success", "2026-11-02T11:00:00Z"))
+    assert ("ci_recovered", "910") in ci_events(src.poll())
+    assert [k for k, _ in ci_events(src.poll()) if k == "ci_recovered"] == []
+
+
+def test_a_failed_run_whose_attempt_2_succeeds_gives_one_recovery(tmp_path):
+    fake = RunsGitHub([run(700, "failure", "2026-11-02T09:00:00Z", attempt=1)])
+    src, store = make(tmp_path, fake)
+    assert ci_events(src.poll()) == [("ci_failed", "700")]
+    fake.run_list = [run(700, "success", "2026-11-02T09:20:00Z", attempt=2)]  # same run id, newer attempt
+    first = src.poll()
+    assert ci_events(first) == [("ci_recovered", "700-a2")] and first[0].branch == "main"
+    assert ci_events(src.poll()) == []  # polled again: reported once
+
+
+def test_attempt_2_failing_again_is_the_same_failure_and_does_not_alert_again(tmp_path):
+    fake = RunsGitHub([run(700, "failure", "2026-11-02T09:00:00Z", attempt=1)])
+    src, store = make(tmp_path, fake)
+    first = src.poll()
+    assert all(store.add_if_new(e) for e in first)
+    fake.run_list = [run(700, "failure", "2026-11-02T09:20:00Z", attempt=2)]
+    second = src.poll()
+    assert ci_events(second) == [("ci_failed", "700")]  # reported by the source, but it is the same event ...
+    assert [store.add_if_new(e) for e in second] == [False]  # ... so dedupe drops it: no new alert and no recovery
+
+
+def test_an_old_failure_replayed_after_a_recovery_does_not_reopen_it(tmp_path):
+    fake = RunsGitHub([run(1, "failure", "2026-11-02T08:00:00Z")])
+    src, store = make(tmp_path, fake)
+    src.poll()
+    fake.run_list = [run(2, "success", "2026-11-02T09:00:00Z"), run(1, "failure", "2026-11-02T08:00:00Z")]
+    assert ("ci_recovered", "2") in ci_events(src.poll())
+    assert ci_events(src.poll()) == [("ci_failed", "1")]  # the old failure is still listed: no second recovery
