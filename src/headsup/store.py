@@ -255,6 +255,38 @@ class Store:
         rows = self._db.execute("SELECT at, purpose, cost_usd FROM cost_log").fetchall()
         return [(p, c) for t, p, c in rows if start <= datetime.fromisoformat(t) < end]
 
+    def cost_total(self) -> float:
+        return self._db.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM cost_log").fetchone()[0]
+
+    # ------------------------------------------------------- dashboard reads
+    def recent_decisions(self, limit=50):
+        """Newest decisions first: dicts with time, source, kind, title, probability, verdict, reason (no event bodies)."""
+        rows = self._db.execute(
+            "SELECT d.decided_at, s.source, s.kind, json_extract(s.event_json, '$.title'), d.probability, d.verdict, d.reason "
+            "FROM decisions d LEFT JOIN seen_events s ON s.content_hash = (SELECT content_hash FROM seen_events "
+            "WHERE event_id = d.event_id ORDER BY first_seen_at DESC LIMIT 1) ORDER BY d.id DESC LIMIT ?", (int(limit),)).fetchall()
+        keys = ("time", "source", "kind", "title", "probability", "verdict", "reason")
+        return [dict(zip(keys, r)) for r in rows]
+
+    def alert_rows(self, limit=20):
+        """Newest alerts first, with button facts and no token values: status, sent_at, title, newest button time,
+        whether every keyboard was removed, and the actions tapped for the event."""
+        rows = self._db.execute(
+            "SELECT a.event_hash, a.event_id, a.status, a.sent_at, json_extract(s.event_json, '$.title'), s.kind, "
+            "(SELECT MAX(created_at) FROM alert_tokens t WHERE t.event_hash = a.event_hash), "
+            "(SELECT MIN(keyboard_removed) FROM alert_tokens t WHERE t.event_hash = a.event_hash AND t.message_id IS NOT NULL), "
+            "(SELECT group_concat(action) FROM button_taps b WHERE b.event_id = a.event_id) "
+            "FROM alerts a LEFT JOIN seen_events s ON s.content_hash = a.event_hash ORDER BY a.rowid DESC LIMIT ?",
+            (int(limit),)).fetchall()
+        keys = ("event_hash", "event_id", "status", "sent_at", "title", "kind", "buttons_at", "keyboards_removed", "taps")
+        out = []
+        for r in rows:
+            d = dict(zip(keys, r))
+            d["taps"] = d["taps"].split(",") if d["taps"] else []
+            d["keyboards_removed"] = bool(d["keyboards_removed"])
+            out.append(d)
+        return out
+
     # ------------------------------------------------------- calendar starts
     def get_calendar_start(self, key):
         row = self._db.execute("SELECT start_utc FROM calendar_starts WHERE key = ?", (key,)).fetchone()

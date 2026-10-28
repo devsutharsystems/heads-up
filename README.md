@@ -109,6 +109,18 @@ Put the repo in `GITHUB_REPOS` and `GITHUB_WRITE_REPOS`.
 
 5. Tests (offline; nothing touches the network): `.venv/bin/python -m pytest`
 
+## Use it without the terminal
+
+`python -m headsup --ui` starts one process that serves a dashboard at <http://127.0.0.1:8765/>, runs a check every 15 minutes (change it on the page), and listens for your Telegram button taps. If nothing answers on the Decider host, it starts `ollama serve` itself (127.0.0.1:11434, models in `.cache/ollama`, keep-alive 60 s) and stops it when you quit; an Ollama you started yourself is left alone. The CLI modes `--once` and `--listen` still expect you to start Ollama.
+
+> **[SCREENSHOT PLACEHOLDER: add `docs/screenshot-dashboard.png` here.]**
+
+**The page shows:** the judge (the Decider) up or down and whether its model is installed (if not, the exact `ollama pull` command), the last and next check and whether checks are paused, which settings are set or missing (names only), alerts today out of 5 and the spend today and in total, the last 50 events with score, decision and reason, and the alerts sent with their button state (pending, active, tapped, expired). **Buttons:** Check now, Pause or Resume automatic checks (button taps keep working while paused), and Preview, a dry run that shows what would happen and sends nothing. No button changes the Decider, the threshold or the daily limit, and Re-run CI stays a Telegram button.
+
+**Double-click launcher.** From the project folder run `chmod +x Heads-Up.command` once, then double-click `Heads-Up.command` in Finder. It opens Terminal, starts the app and opens the page; closing that Terminal window stops it. The first time, macOS may refuse to open it because it is from an unidentified developer: right-click the file and choose **Open**, then **Open** again (**UNVERIFIED:** the exact wording on your macOS version; newer versions may ask you to allow it under System Settings > Privacy & Security). The app needs the virtual environment from the Quickstart (`.venv`) and a filled-in `.env`.
+
+**Security.** The server listens on 127.0.0.1 only and refuses any other address. Every request must carry a `Host` of `127.0.0.1` or `localhost` with the right port, and every button needs a random per-session token plus a matching `Origin`, so another website open in your browser cannot press them. Responses never contain a token, a key, or the calendar address, and event titles are HTML-escaped. This does not stop other programs running as you on the same Mac from reaching the port. `.env` is read once at start: restart after changing it. Without Telegram settings the page works but automatic checks stay off; only Preview runs. Do not run `--once` or `--listen` at the same time as `--ui`: two programs asking Telegram for taps can clash.
+
 ## 4. Results
 
 All numbers come from [`eval/EVAL_REPORT.md`](eval/EVAL_REPORT.md) and [`eval/PILOT_REPORT.md`](eval/PILOT_REPORT.md). The data is synthetic (see section 6).
