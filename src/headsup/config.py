@@ -46,6 +46,19 @@ def _shell_overrides(shell_values, env_path):
             if shell_values.get(n) is not None and in_file.get(n) and in_file[n] != shell_values[n]]
 
 
+def setting_status():
+    """{name: True if it is set (non-empty) in the process}, for the dashboard. Names and booleans only, never a value."""
+    return {n: bool(os.environ.get(n)) for n in SETTING_NAMES}
+
+
+def ollama_serve_env(host, models_dir):
+    """The environment for a child `ollama serve`: a few harmless variables plus the project's Ollama settings.
+    No token or key from the process environment is passed on."""
+    env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "USER", "LANG") if k in os.environ}
+    env.update(OLLAMA_HOST=host, OLLAMA_MODELS=str(models_dir), OLLAMA_KEEP_ALIVE="60s")
+    return env
+
+
 def load_settings(env_path=DEFAULT_ENV) -> Settings:
     shell_values = {n: os.environ.get(n) for n in SETTING_NAMES}  # before load_dotenv; it never overrides these
     load_dotenv(env_path, override=False)

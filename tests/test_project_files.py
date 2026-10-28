@@ -30,3 +30,12 @@ def test_pyproject_pins_python_312_and_exact_versions():
 
 def test_data_dir_is_gitignored():
     assert "data/" in (ROOT / ".gitignore").read_text().splitlines()
+
+
+def test_the_launcher_is_executable_and_only_starts_the_dashboard():
+    import os
+    path = ROOT / "Heads-Up.command"
+    text = path.read_text()
+    assert os.access(path, os.X_OK) and text.startswith("#!/bin/bash")
+    assert 'cd "$(dirname "$0")"' in text and "-m headsup --ui" in text and ".venv/bin/python" in text
+    assert "http://127.0.0.1:8765/" in text and ".env" not in text and "sudo" not in text

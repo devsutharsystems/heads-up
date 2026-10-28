@@ -324,3 +324,34 @@ def test_decision_reasons_carry_the_chosen_note_only_while_the_app_runs_the_chos
     app = build_app(chosen, client=world().client, anthropic_client=None, now=Clock(), dry_run=True, out=lambda s: None,
                     store=store_at(tmp_path), sleep=lambda s: None)
     assert app.policy.threshold == 0.40 and app.decider.fmt == "F2" and app.policy._note.endswith(CHOSEN_NOTE)
+
+
+# ---------------------------------------------------------------- --ui
+
+def test_ui_is_a_third_exclusive_mode():
+    assert parse_args(["--ui"]).ui is True
+    for argv in (["--ui", "--once"], ["--ui", "--listen", "5"]):
+        with pytest.raises(SystemExit):
+            parse_args(argv)
+
+
+def test_ui_starts_the_dashboard_and_needs_no_telegram_settings(monkeypatch):
+    import headsup.__main__ as cli
+    seen = []
+    monkeypatch.setattr(cli, "run_ui", lambda settings, out: seen.append(settings) or 0)
+    assert main(["--ui"], settings=Settings(), out=lambda s: None) == 0 and len(seen) == 1
+
+
+def test_ui_reports_a_busy_port_and_starts_nothing(tmp_path):
+    import socket
+    import headsup.__main__ as cli
+    busy = socket.socket()
+    busy.bind(("127.0.0.1", 0))
+    busy.listen(1)
+    out = []
+    try:
+        code = cli.run_ui(Settings(), out=out.append, port=busy.getsockname()[1], db_path=tmp_path / "t.db",
+                          client=world().client, install_signals=False)
+    finally:
+        busy.close()
+    assert code == 2 and "already in use" in out[0] and all("Ollama" not in line for line in out)
