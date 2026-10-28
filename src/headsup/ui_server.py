@@ -61,13 +61,14 @@ class Context:
             for a in alerts:
                 a["state"] = alert_state(a, now)
                 del a["event_hash"], a["event_id"], a["buttons_at"], a["keyboards_removed"], a["taps"]
+            costs = store.costs_between(start, end)
             today = {"alerts_today": store.interrupts_between(start, end), "limit": DAILY_LIMIT,
-                     "spend_today": sum(c for _, c in store.costs_between(start, end)), "spend_total": store.cost_total()}
+                     "spend_today": sum(c for _, c in costs), "spend_total": store.cost_total()}
             events = store.recent_decisions(50)
         finally:
             store.close()
         return {"status": self.runner.status(), "health": self.health(), "setup": self.setup_status(), "today": today,
-                "events": events, "alerts": alerts, "fmt": fmt_time}
+                "events": events, "alerts": alerts, "fmt": fmt_time, "now": now, "calls_today": len(costs)}  # the last two are for the page only
 
 
 class Handler(BaseHTTPRequestHandler):
