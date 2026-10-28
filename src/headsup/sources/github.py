@@ -4,7 +4,8 @@ The HTTP client, store and clock are passed in, so tests run against httpx.MockT
 Text from GitHub (titles, bodies) is untrusted data: it is only copied into Event fields.
 Timeouts: connect 10 s, read 15 s, one retry on a connect timeout only (headsup.netutil).
 CI: failures and recoveries are tracked per (repo, workflow, branch); a recovery is a success newer than the last stored
-failure, including a later run_attempt of the same run id.
+failure, including a later run_attempt of the same run id. A failed attempt that comes after a recovery of the same run id
+gets the id suffix -a{N}, like the recovery; a failure with no recovery in between keeps the plain run id (one alert).
 Rate limits: when x-ratelimit-remaining reaches 0, or a 403/429 reports a limit, polling stops
 for this run and a warning is recorded; nothing sleeps or retries.
 """
@@ -102,6 +103,25 @@ class GitHubSource:
         return [self._event(repo, "pr_opened", p["number"], p["title"], p.get("body"), p["html_url"], _ts(p["created_at"]))
                 for p in data]
 
+    def _failure_key(self, repo, run_id, attempt):
+        """The plain run id, unless the latest stored event of this run below `attempt` is a recovery: then it is a new
+        failure and gets -a{attempt}. A plain failure counts as attempt 0, a recovery or -a{N} event as its attempt."""
+        if attempt <= 1:
+            return run_id
+        latest = None  # (attempt, kind)
+        for kind in ("ci_failed", "ci_recovered"):
+            for e in self.store.events_of_kind(kind):
+                tail = e.id[len(f"github:{repo}:{kind}:"):] if e.id.startswith(f"github:{repo}:{kind}:") else ""
+                if tail == str(run_id):
+                    n = 0 if kind == "ci_failed" else 1
+                elif tail.startswith(f"{run_id}-a") and tail[len(f"{run_id}-a"):].isdigit():
+                    n = int(tail[len(f"{run_id}-a"):])
+                else:
+                    continue
+                if n < attempt and (latest is None or n >= latest[0]):
+                    latest = (n, kind)
+        return f"{run_id}-a{attempt}" if latest and latest[1] == "ci_recovered" else run_id
+
     def _runs(self, repo):
         # The repo call is not ETag'd: a 304 would not give us the default branch back.
         meta = self._get(f"/repos/{repo}", use_etag=False)
@@ -121,7 +141,8 @@ class GitHubSource:
             state = self.store.get_ci_run(repo, name, branch)  # (failed_at, open, recovered_at) or None
             if conclusion == "failure":
                 # Same run id on every attempt, so a re-run that fails again has the same content_hash: no second alert.
-                out.append(self._event(repo, "ci_failed", run["id"], f"CI failed: {name} on {branch}", run.get("display_title"),
+                # Only a failure after a recovery of this run is new (key with -a{N}).
+                out.append(self._event(repo, "ci_failed", self._failure_key(repo, run["id"], attempt), f"CI failed: {name} on {branch}", run.get("display_title"),
                                        run["html_url"], when, branch=branch, is_default_branch=is_default))
                 if state is None or state[1]:  # new failing workflow, or still failing: remember the latest failing time
                     self.store.set_ci_run(repo, name, branch, max(when, state[0]) if state else when, True)

@@ -135,7 +135,7 @@ On the 7 test days, the limit of 5 never caused a miss.
 
 **Pilot (before building).** 30 synthetic events over 3 days. The pre-set go/no-go rule gave GO: the best qualifying Decider point reached recall 0.80 at a threshold chosen on those same 30 events, so optimistic (rules 0.70; no winner on 30 events). Haiku caught 3 of 10 with no false alarms.
 
-**Real Haiku spend.** $0.001498 in total, 100 of the 200 allowed calls ($0.000443 pilot, $0.001055 main test), taken from the API usage fields times the listed price.
+**Real Haiku spend.** $0.0015249 in total: $0.001498 for the evaluation (100 of the 200 allowed calls: $0.000443 pilot, $0.001055 main test) plus $0.0000269 for the live check on 28 Oct (1 call), taken from the API usage fields times the listed price.
 
 ## First live run (27 Oct 2026)
 
@@ -159,6 +159,8 @@ On the 7 test days, the limit of 5 never caused a miss.
 The Decider seemed to rate meetings by how soon they start, not by what they are: in the same run, 'Client demo' (about 19 min away) scored 0.36 and was only logged, below 'Team sync' (14 min, 0.40). Only a handful of data points, so this is a pattern to test, not a result.
 
 **Haiku was off during the live run**, so the alerts used template text, because the API key was being replaced.
+
+Verified live on 28 Oct: Haiku wrote the alert text for a real sandbox CI failure (1 call, $0.0000269).
 
 ## 5. Requirements traceability
 
