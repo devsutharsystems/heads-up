@@ -178,3 +178,30 @@ def test_an_old_failure_replayed_after_a_recovery_does_not_reopen_it(tmp_path):
     fake.run_list = [run(2, "success", "2026-11-02T09:00:00Z"), run(1, "failure", "2026-11-02T08:00:00Z")]
     assert ("ci_recovered", "2") in ci_events(src.poll())
     assert ci_events(src.poll()) == [("ci_failed", "1")]  # the old failure is still listed: no second recovery
+
+
+def test_fail_pass_fail_again_on_re_runs_gives_one_new_ci_failed(tmp_path):
+    fake = RunsGitHub([run(800, "failure", "2026-11-02T09:00:00Z", attempt=1)])
+    src, store = make(tmp_path, fake)
+    assert [store.add_if_new(e) for e in src.poll()] == [True]
+    fake.run_list = [run(800, "success", "2026-11-02T09:10:00Z", attempt=2)]
+    first = src.poll()
+    assert ci_events(first) == [("ci_recovered", "800-a2")] and [store.add_if_new(e) for e in first] == [True]
+    fake.run_list = [run(800, "failure", "2026-11-02T09:20:00Z", attempt=3)]  # failed again after the recovery
+    again = src.poll()
+    assert ci_events(again) == [("ci_failed", "800-a3")] and [store.add_if_new(e) for e in again] == [True]
+    assert [store.add_if_new(e) for e in src.poll()] == [False]  # polled again: the same event, no new alert
+    fake.run_list = [run(800, "failure", "2026-11-02T09:30:00Z", attempt=4)]  # fails once more, no recovery in between
+    again2 = src.poll()
+    assert ci_events(again2) == [("ci_failed", "800")] and [store.add_if_new(e) for e in again2] == [False]  # same failure
+
+
+def test_fail_then_fail_again_gives_no_new_ci_failed(tmp_path):
+    fake = RunsGitHub([run(810, "failure", "2026-11-02T09:00:00Z", attempt=1)])
+    src, store = make(tmp_path, fake)
+    assert [store.add_if_new(e) for e in src.poll()] == [True]
+    for attempt, minute in ((2, 10), (3, 20)):
+        fake.run_list = [run(810, "failure", f"2026-11-02T09:{minute}:00Z", attempt=attempt)]
+        events = src.poll()
+        assert ci_events(events) == [("ci_failed", "810")]  # keeps the plain id
+        assert [store.add_if_new(e) for e in events] == [False]
