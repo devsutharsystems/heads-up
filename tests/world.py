@@ -196,5 +196,11 @@ def settings(**over):
     return Settings(**base)
 
 
-def store_at(tmp_path):
-    return Store(tmp_path / "data" / "headsup.db")
+def store_at(tmp_path, baselined=True):
+    """A store for a pipeline run. By default it models an install that has been running: the first-run baseline is already done, so
+    the events a test feeds in can alert. Pass baselined=False for the very first run after setup."""
+    store = Store(tmp_path / "data" / "headsup.db")
+    if baselined:
+        for name in ("github", "ical"):
+            store.set_kv(f"baseline_{name}", NOW.isoformat())
+    return store

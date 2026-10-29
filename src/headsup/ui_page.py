@@ -327,6 +327,8 @@ def human_reason(verdict, reason):
         return "Judge was down"
     if reason.startswith("snoozed"):
         return "Snoozed"
+    if reason.startswith("first run"):
+        return "Already there at setup"
     return "Logged"
 
 

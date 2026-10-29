@@ -112,6 +112,10 @@ class Store:
                                 "WHERE s.kind = ?", (kind,)).fetchall()
         return [self._event_from_json(r[0]) for r in rows]
 
+    def has_events_from(self, source) -> bool:
+        """True if any event of this Event.source ("github", "calendar") was ever stored."""
+        return self._db.execute("SELECT 1 FROM seen_events WHERE source = ? LIMIT 1", (source,)).fetchone() is not None
+
     def seen_count(self) -> int:
         return self._db.execute("SELECT COUNT(*) FROM seen_events").fetchone()[0]
 
