@@ -18,7 +18,17 @@ ROOT = config.ROOT
 COMPLETE = {"TELEGRAM_BOT_TOKEN": BOT, "TELEGRAM_CHAT_ID": str(CHAT), "GITHUB_REPOS": REPO}
 
 
-def start_ui(tmp_path, monkeypatch, env_values=None, **kwargs):
+def wait_for_line(lines, predicate, seconds=5.0):
+    """run_ui prints from its own thread, so a line is only there some moments after the server object exists: poll, do not peek."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if any(predicate(line) for line in list(lines)):
+            return True
+        time.sleep(0.01)
+    return any(predicate(line) for line in list(lines))
+
+
+def start_ui(tmp_path, monkeypatch, env_values=None, browser=None, **kwargs):
     """The real run_ui on an ephemeral port with the fake world and a temp settings file. Returns what the test needs to look and to stop."""
     env = tmp_path / ".env"
     if env_values:
@@ -26,7 +36,7 @@ def start_ui(tmp_path, monkeypatch, env_values=None, **kwargs):
     opened, captured, lines = [], [], []
     real = cli.make_server
     monkeypatch.setattr(cli, "make_server", lambda host, port, ctx: captured.append(real(host, port, ctx)) or captured[-1])
-    monkeypatch.setattr(cli.webbrowser, "open", lambda url: opened.append(url) or True)
+    monkeypatch.setattr(cli.webbrowser, "open", browser or (lambda url: opened.append(url) or True))
     thread = threading.Thread(target=cli.run_ui, args=(config.load_settings(env),), daemon=True,
                               kwargs=dict(out=lines.append, port=0, client=World().client, db_path=tmp_path / "t.db", install_signals=False, env_path=env, **kwargs))
     thread.start()
@@ -91,17 +101,32 @@ def test_a_calendar_alone_is_enough_for_a_source(tmp_path, monkeypatch):
 def test_the_browser_is_not_opened_when_asked_not_to(tmp_path, monkeypatch):
     server, lines, opened, stop, wait = start_ui(tmp_path, monkeypatch, open_browser=False)
     try:
-        assert wait(0.8) == [] and not any("opening" in line.lower() for line in lines)
+        assert wait_for_line(lines, lambda line: line.startswith("Heads-Up dashboard: http://127.0.0.1:")), "the app is up and has printed its address"
+        assert wait(1.0) == [] and not any("opening" in line.lower() for line in lines)
     finally:
         stop()
 
 
-def test_a_browser_that_cannot_open_does_not_stop_the_app(tmp_path, monkeypatch):
-    server, lines, opened, stop, wait = start_ui(tmp_path, monkeypatch)
+def test_a_browser_that_cannot_open_does_not_stop_the_app_and_the_address_is_still_printed(tmp_path, monkeypatch):
+    attempts = []
+
+    def no_desktop(url):
+        attempts.append(url)
+        raise RuntimeError("no desktop")
+
+    server, lines, opened, stop, wait = start_ui(tmp_path, monkeypatch, browser=no_desktop)  # the browser fails from the very start
     try:
-        monkeypatch.setattr(cli.webbrowser, "open", lambda url: (_ for _ in ()).throw(RuntimeError("no desktop")))
-        cli.open_in_browser("http://127.0.0.1:1/")  # must not raise
-        assert any(line.startswith("Heads-Up dashboard: http://127.0.0.1:") for line in lines), "the address is printed anyway"
+        port = server.server_address[1]
+        end = time.monotonic() + 5
+        while not attempts and time.monotonic() < end:
+            time.sleep(0.01)
+        assert attempts == [f"http://127.0.0.1:{port}/setup"], "the opener did try, and its failure was swallowed"
+        assert wait_for_line(lines, lambda line: line == f"Heads-Up dashboard: http://127.0.0.1:{port}/  (Ctrl-C to stop)"), lines
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "/", headers={"Host": f"127.0.0.1:{port}"})
+        assert conn.getresponse().status == 200, "and the app is still serving"
+        conn.close()
     finally:
         stop()
 
