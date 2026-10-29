@@ -137,6 +137,8 @@ PAGE = """<!doctype html>
   .alerts li:last-child { border-bottom:0; }
   .alerts .title { flex:1 1 12rem; }
   footer { color:var(--muted); font-size:var(--t-sm); }
+  .settings-link { font-weight:600; font-size:var(--t-sm); color:#3730a3; text-decoration:none; }
+  .settings-link:hover { text-decoration:underline; }
   .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
   @media (max-width:60rem) { :root { --cols:100px 110px minmax(0,1fr) 130px 110px; --gap:8px; } }
   @media (max-width:43.7rem) { .ev-head { display:none; } .ev { grid-template-columns:minmax(0,1fr); gap:6px; } .toolbar { flex-wrap:wrap; } .toolbar .spacer { display:none; } .toolbar .group { width:100%; } main { padding:var(--s2) 12px var(--s3); } .card { padding:16px; } }
@@ -151,6 +153,7 @@ PAGE = """<!doctype html>
     <div><h1>Heads-Up</h1><p class="tagline">A proactive assistant that interrupts you only when it matters.</p></div>
   </div>
   <div class="pills" id="pills">@@PILLS@@</div>
+  <a href="/setup" id="settings-link" class="settings-link">Settings</a>
 </header>
 <div class="card">
   <div class="toolbar">
@@ -165,7 +168,7 @@ PAGE = """<!doctype html>
   <pre id="preview"></pre>
 </div>
 <div id="live">@@FRAGMENT@@</div>
-<footer>Local only (127.0.0.1). Settings are read from <code>.env</code> when the app starts; changing them needs a restart. Re-run CI is only available from the Telegram buttons.</footer>
+<footer>Local only (127.0.0.1). Change settings on the <a href="/setup">Settings page</a>: saving there takes effect at once. A hand edit of <code>.env</code> needs a restart. Re-run CI is only available from the Telegram buttons.</footer>
 </main>
 <script nonce="@@NONCE@@">
 const token = document.querySelector('meta[name=csrf]').content;
@@ -412,6 +415,8 @@ def render_fragment(snap):
     fmt, now = snap["fmt"], snap["now"]
     out = [f'<div hidden data-running="{1 if s["running"] else 0}" data-enabled="{1 if s["checks_enabled"] else 0}"></div>',
            f'<div hidden data-pills>{_pills(snap)}</div>']
+    if snap.get("setup_missing"):  # first run, or something was cleared: say what is missing and where to fix it
+        out.append(f'<div class="notice">Setup needed: {_e(", ".join(snap["setup_missing"]))}. <a href="/setup">Open the Settings page</a>.</div>')
 
     # notices (the judge and Telegram)
     if not h["up"]:

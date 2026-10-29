@@ -7,6 +7,7 @@ tested by re-running a build.
 """
 
 import re
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -27,8 +28,9 @@ def _result(ok, message, **extra):
     return {"ok": ok, "message": message, **extra}
 
 
-def check_github(settings, client):
-    """One result per watched repository: GET /repos/{repo} with the saved read token."""
+def check_github(settings, client, deadline=None, clock=time.monotonic):
+    """One result per watched repository: GET /repos/{repo} with the saved read token. Repositories left when `deadline` (a
+    clock() value) has passed are reported as skipped instead of being asked: 50 slow repositories must not run for minutes."""
     if not settings.github_repos:
         return [_result(False, "no repositories set", name="GitHub")]
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "heads-up"}
@@ -36,6 +38,9 @@ def check_github(settings, client):
         headers["Authorization"] = f"Bearer {settings.github_token}"
     results = []
     for repo in settings.github_repos:
+        if deadline is not None and clock() > deadline:
+            results.append(_result(False, "skipped: the test ran out of time", name=repo))
+            continue
         url = f"{GITHUB_API}/repos/{repo}"
         try:
             status = client.get(url, headers=headers, timeout=TIMEOUT).status_code  # one attempt: a test should report, not retry
@@ -102,9 +107,9 @@ def not_tested(settings):
     }
 
 
-def run_checks(settings, client, now=None):
+def run_checks(settings, client, now=None, budget_s=45.0, clock=time.monotonic):
     """Every check on the saved settings. Reads and sends nothing but the three test requests above."""
-    return {"github": check_github(settings, client), "calendar": check_calendar(settings, client, now),
+    return {"github": check_github(settings, client, clock() + budget_s, clock), "calendar": check_calendar(settings, client, now),
             "telegram": check_telegram(settings, client), **not_tested(settings)}
 
 

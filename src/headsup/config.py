@@ -397,6 +397,13 @@ def _effective(env_path):
     return {n: (os.environ.get(n) if n in shell else file_values.get(n)) or "" for n in SETTING_NAMES}
 
 
+def known_secrets(env_path=DEFAULT_ENV):
+    """The current values of every key, the chat ID and the calendar address. ONLY for the server's last-line leak check (a response
+    that contains one of these is replaced by a generic error): never put the result in a response, a log or a message."""
+    have = _effective(env_path)
+    return [have[f.name] for f in FIELDS if f.kind in ("secret", "id") and have[f.name]]
+
+
 def required_missing(env_path=DEFAULT_ENV):
     """Plain-language labels of what is still needed before checks can run. Never a value."""
     have = _effective(env_path)

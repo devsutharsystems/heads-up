@@ -1,15 +1,18 @@
 """The dashboard's HTTP server: standard library only, 127.0.0.1 only.
 
 Security: the bind address must be 127.0.0.1; every request needs a Host of 127.0.0.1:<port> or localhost:<port>
-(DNS rebinding); every POST needs the per-process token in X-CSRF-Token, an Origin of the same two forms, a JSON content
-type and a body of at most 4 KB. Responses are built from whitelisted fields: no token, key or URL from .env is ever
-put in one, and pipeline text goes through the Runner's redactor. There is no route for the Decider, the threshold,
-the daily limit, or any GitHub action (Re-run CI stays Telegram-only). Any program running as the same user on this
-Mac can still reach the port; the token and Origin checks stop other websites, not local programs.
+(DNS rebinding), on GET and POST alike; every POST needs the per-process token in X-CSRF-Token, an Origin of the same two
+forms, a JSON content type and a Content-Length that is a plain number within the route's limit (4 KB; 16 KB for saving
+settings). Responses are built from whitelisted fields: no token, key or URL from .env is ever put in one, and pipeline
+text goes through the Runner's redactor. The setup routes add a last line of defence: a response that contains a known
+secret is replaced by a generic error. There is no route for the Decider, the threshold, the daily limit, or any GitHub
+action (Re-run CI stays Telegram-only). Any program running as the same user on this Mac can still reach the port; the
+token and Origin checks stop other websites, not local programs.
 """
 
 import hmac
 import json
+import re
 import secrets
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,12 +21,23 @@ from headsup.actions import TOKEN_TTL
 from headsup.localtime import LOCAL_TZ, day_bounds
 from headsup.policy import DAILY_LIMIT
 from headsup.ui_page import pause_button, render_fragment, render_page
+from headsup.ui_setup_page import render_setup_page
 
 HOST = "127.0.0.1"
 PORT = 8765
 MAX_BODY = 4096
 GET_JSON = ("status", "setup", "today", "events", "alerts")
 POST_ROUTES = ("check", "pause", "resume", "interval", "preview")
+SETUP_ROUTES = ("save", "clear", "apply", "find-chat", "use-chat", "test-message", "test-connection")  # /api/setup/<name>
+SETUP_BODY_LIMITS = {"save": 16 * 1024}  # every other setup route uses MAX_BODY
+_SETUP_METHODS = {"save": "save", "clear": "clear", "apply": "apply", "find-chat": "find_chat", "use-chat": "use_chat",
+                  "test-message": "send_test", "test-connection": "test_connection"}
+_LENGTH = re.compile(r"[0-9]{1,9}")  # a plain number: no sign, no underscores, no spaces
+
+
+def page_csp(nonce):
+    return (f"default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{nonce}'; connect-src 'self'; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
 
 def fmt_time(iso):
@@ -47,8 +61,9 @@ def alert_state(row, now):
 class Context:
     """What the handlers need: the runner, a store factory, the setup status function, a health function."""
 
-    def __init__(self, *, runner, open_store, setup_status, health, now=None):
+    def __init__(self, *, runner, open_store, setup_status, health, now=None, setup_service=None):
         self.runner, self.open_store, self.setup_status, self.health = runner, open_store, setup_status, health
+        self.setup_service = setup_service  # the /setup routes exist only when this is given
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.token = secrets.token_urlsafe(32)
 
@@ -67,13 +82,16 @@ class Context:
             events = store.recent_decisions(50)
         finally:
             store.close()
+        missing = self.setup_service.required_missing() if self.setup_service else []
         return {"status": self.runner.status(), "health": self.health(), "setup": self.setup_status(), "today": today,
-                "events": events, "alerts": alerts, "fmt": fmt_time, "now": now, "calls_today": len(costs)}  # the last two are for the page only
+                "events": events, "alerts": alerts, "fmt": fmt_time, "now": now, "calls_today": len(costs),  # the last two are for the page only
+                "setup_missing": missing}
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "HeadsUp"
     protocol_version = "HTTP/1.0"  # one request per connection: an early refusal never leaves an unread body behind
+    timeout = 30  # a client that stops sending frees its thread after 30 s instead of holding it for ever
 
     def log_message(self, *args):  # no request logging
         pass
@@ -121,10 +139,14 @@ class Handler(BaseHTTPRequestHandler):
         ctx, path = self.server.ctx, self.path.split("?", 1)[0]
         if path == "/":
             nonce = secrets.token_urlsafe(16)
-            csp = (f"default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{nonce}'; connect-src 'self'; "
-                   "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self._send(200, render_page(ctx.snapshot(), ctx.token, nonce), "text/html; charset=utf-8",
-                       {"Content-Security-Policy": csp})
+                       {"Content-Security-Policy": page_csp(nonce)})
+        elif path == "/setup" and ctx.setup_service is not None:
+            nonce = secrets.token_urlsafe(16)
+            self._send(200, render_setup_page(ctx.token, nonce), "text/html; charset=utf-8", {"Content-Security-Policy": page_csp(nonce)})
+        elif path == "/api/setup-form" and ctx.setup_service is not None:
+            code, obj = ctx.setup_service.form()
+            self._setup_reply(code, obj, None)
         elif path == "/fragment":
             snap = ctx.snapshot()
             self._json(200, {"html": render_fragment(snap), "pause_button": pause_button(snap["status"]["paused"])})
@@ -156,19 +178,57 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(403, {"error": "forbidden token"})
         if not (self.headers.get("Content-Type") or "").lower().startswith("application/json"):
             return self._json(415, {"error": "JSON only"})
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError:
-            return self._json(400, {"error": "bad length"})
-        if length > MAX_BODY:
-            return self._json(413, {"error": "body too large"})
+        group, name = self._post_route(path, ctx)  # resolved BEFORE the body is read: an unknown path is a 404, the limit is per route
+        if group is None:
+            return self._json(404, {"error": "not found"})
+        body = self._read_json(SETUP_BODY_LIMITS.get(name, MAX_BODY) if group == "setup" else MAX_BODY)
+        if body is None:
+            return
+        if group == "setup":
+            return self._setup_post(name, body, ctx.setup_service)
+        self._route(name, body, ctx.runner)
+
+    @staticmethod
+    def _post_route(path, ctx):
+        if path.startswith("/api/setup/") and ctx.setup_service is not None and path[11:] in SETUP_ROUTES:
+            return "setup", path[11:]
+        if path.startswith("/api/") and path[5:] in POST_ROUTES:
+            return "dashboard", path[5:]
+        return None, None
+
+    def _read_json(self, limit):
+        """The request body as a dict, or None after sending the refusal. Content-Length must be a plain number (so "-5" cannot make
+        the read wait for a stream that never ends) and within `limit`."""
+        raw = self.headers.get("Content-Length", "0").strip()
+        if not _LENGTH.fullmatch(raw):
+            self._json(400, {"error": "bad length"})
+            return None
+        length = int(raw)
+        if length > limit:
+            self._json(413, {"error": "body too large"})
+            return None
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
         except ValueError:
-            return self._json(400, {"error": "bad JSON"})
-        if not isinstance(body, dict) or not path.startswith("/api/") or path[5:] not in POST_ROUTES:
-            return self._json(404, {"error": "not found"})
-        self._route(path[5:], body, ctx.runner)
+            self._json(400, {"error": "bad JSON"})
+            return None
+        if not isinstance(body, dict):
+            self._json(400, {"error": "bad request"})
+            return None
+        return body
+
+    def _setup_post(self, name, body, service):
+        code, obj = getattr(service, _SETUP_METHODS[name])(body)
+        self._setup_reply(code, obj, body)
+
+    def _setup_reply(self, code, obj, body):
+        """Send a setup response, unless it contains a secret: that is a bug, so a generic error goes out instead and only the
+        class name is kept."""
+        text = json.dumps(obj, ensure_ascii=False)
+        if not self.server.ctx.setup_service.is_clean(text, body):
+            self.server.last_error = "SecretInResponse"
+            return self._json(500, {"error": "server error"})
+        self._send(code, text, extra={"Content-Security-Policy": "default-src 'none'"})
 
     def _route(self, name, body, runner):
         if name == "check":

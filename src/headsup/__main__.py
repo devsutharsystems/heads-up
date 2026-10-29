@@ -21,6 +21,7 @@ import httpx
 from headsup import pipeline
 from headsup.actions import ActionHandler, DryRunWriter, GitHubWriter
 from headsup.config import CHOSEN_FORMAT, CHOSEN_NOTE, CHOSEN_THRESHOLD, load_settings, setting_status
+from headsup.setup_service import SetupService
 from headsup.costlog import CostLog
 from headsup.decider import Decider
 from headsup.haiku import build_client
@@ -107,7 +108,7 @@ def build_runner(settings, *, client, open_store, now):
                   now=now, redact=Redactor(secrets_known))
 
 
-def run_ui(settings, *, out, port=PORT, client=None, db_path=None, now=None, install_signals=True):
+def run_ui(settings, *, out, port=PORT, client=None, db_path=None, now=None, install_signals=True, env_path=None):
     """The dashboard: HTTP server (main thread), one worker thread (checks and taps), and the Ollama child if needed."""
     now = now or (lambda: datetime.now(timezone.utc))
     if install_signals:  # a real run: show each line at once, also when the output goes to a file
@@ -120,7 +121,9 @@ def run_ui(settings, *, out, port=PORT, client=None, db_path=None, now=None, ins
     open_store = (lambda: Store(db_path)) if db_path else Store
     supervisor = Supervisor(lambda s: build_runner(s, client=client, open_store=open_store, now=now), settings)
     child = OllamaChild(client, settings.decider_host)
-    ctx = Context(runner=supervisor.runner, open_store=open_store, setup_status=setting_status, health=child.health, now=now)
+    setup_service = SetupService(supervisor, client, **({} if env_path is None else {"env_path": env_path}))
+    ctx = Context(runner=supervisor.runner, open_store=open_store, setup_status=setting_status, health=child.health, now=now,
+                  setup_service=setup_service)
     supervisor.on_swap = lambda runner: setattr(ctx, "runner", runner)  # handlers read ctx.runner on every request
     try:
         server = make_server(HOST, port, ctx)

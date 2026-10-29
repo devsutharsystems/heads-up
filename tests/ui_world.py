@@ -69,8 +69,9 @@ HEALTH = {"up": True, "started_by_us": False, "model": "present", "model_name": 
 class Live:
     """A server on an ephemeral 127.0.0.1 port, served from a thread."""
 
-    def __init__(self, path, runner, setup=lambda: {"TELEGRAM_BOT_TOKEN": True, "ICAL_URL": False}, health=lambda: dict(HEALTH)):
-        self.ctx = Context(runner=runner, open_store=lambda: Store(path), setup_status=setup, health=health, now=lambda: NOW)
+    def __init__(self, path, runner, setup=lambda: {"TELEGRAM_BOT_TOKEN": True, "ICAL_URL": False}, health=lambda: dict(HEALTH), setup_service=None):
+        self.ctx = Context(runner=runner, open_store=lambda: Store(path), setup_status=setup, health=health, now=lambda: NOW,
+                           setup_service=setup_service)
         self.server = make_server("127.0.0.1", 0, self.ctx)
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.02), daemon=True)

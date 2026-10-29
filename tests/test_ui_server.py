@@ -191,10 +191,14 @@ def test_checks_are_off_without_telegram_but_preview_works(tmp_path):
 def test_no_route_reaches_the_decider_threshold_limit_or_a_github_action():
     assert POST_ROUTES == ("check", "pause", "resume", "interval", "preview")
     assert GET_JSON == ("status", "setup", "today", "events", "alerts")
+    import headsup.setup_service as service
     import headsup.ui_page as page
     import headsup.ui_runner as runner
     import headsup.ui_server as server
-    for module in (page, runner, server):
+    import headsup.ui_setup_page as setup_page
+    from headsup.ui_server import SETUP_ROUTES
+    assert SETUP_ROUTES == ("save", "clear", "apply", "find-chat", "use-chat", "test-message", "test-connection")  # a separate group: POST_ROUTES is unchanged
+    for module in (page, runner, server, setup_page, service):  # the setup page and its service are out of reach of the judge and of Re-run CI too
         text = open(module.__file__).read()
         assert "ActionHandler" not in text and "GitHubWriter" not in text and "rerun" not in text.lower()
         assert "decider_threshold" not in text and "decider_format" not in text and "under_daily_limit" not in text
