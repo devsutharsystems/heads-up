@@ -10,7 +10,9 @@ The bot token is part of every request URL, so errors carry only the method name
 class, never the URL.
 """
 
+import re
 import time
+from datetime import datetime, timezone
 
 import httpx
 
@@ -89,6 +91,33 @@ class Telegram:
             payload["offset"] = int(offset)
         return self._call("getUpdates", payload, timeout=timeout + 10.0) or []
 
+    def get_me(self):
+        """The bot's own record: proves the token works (used by the setup page's connection test)."""
+        return self._call("getMe", {}, timeout=15.0) or {}
+
+    def recent_chats(self):
+        """Who has messaged the bot lately, for the setup page's "Find my chat ID". It READS without confirming: no offset is sent
+        and none is stored, so it can never consume a button tap or move the polling position. Only `message` updates are asked for.
+        Returns ({id: {"id", "name", "last"}} newest first as a list, number of non-private chats seen). Buttons only work in a
+        private chat (the sender must be the chat), so groups and channels are counted but not offered."""
+        updates = self._call("getUpdates", {"timeout": 0, "allowed_updates": ["message"]}, timeout=15.0) or []
+        private, others = {}, 0
+        for update in updates:
+            message = update.get("message") if isinstance(update, dict) else None
+            chat = message.get("chat") if isinstance(message, dict) else None
+            if not isinstance(chat, dict) or isinstance(chat.get("id"), bool) or not isinstance(chat.get("id"), int):
+                continue
+            if chat.get("type") != "private" or chat["id"] <= 0:
+                others += 1
+                continue
+            date = message.get("date")
+            last = datetime.fromtimestamp(date, tz=timezone.utc) if isinstance(date, int) and not isinstance(date, bool) else None
+            known = private.get(chat["id"])
+            if known is None or (last is not None and (known["last"] is None or last > known["last"])):
+                private[chat["id"]] = {"id": chat["id"], "name": _display_name(chat), "last": last}
+        ordered = sorted(private.values(), key=lambda c: (c["last"] is not None, c["last"]), reverse=True)
+        return ordered, others
+
     def confirm(self, update_id):
         self.store.set_kv(OFFSET_KEY, update_id + 1)
 
@@ -98,3 +127,12 @@ class Telegram:
     def remove_keyboard(self, message_id):
         return self._call("editMessageReplyMarkup", {"chat_id": self.chat_id, "message_id": message_id,
                                                       "reply_markup": {"inline_keyboard": []}})
+
+
+def _display_name(chat):
+    """A short, printable name for a chat: first and last name, else the username. Control characters are dropped."""
+    name = " ".join(x for x in (chat.get("first_name"), chat.get("last_name")) if isinstance(x, str) and x.strip())
+    if not name and isinstance(chat.get("username"), str):
+        name = "@" + chat["username"]
+    name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip()
+    return name[:60] or "(no name)"

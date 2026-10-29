@@ -58,11 +58,15 @@ class World:
         self.calendar_status = 200
         self.timeouts = []  # the timeout settings each GET carried
         self.telegram_fails = False
+        self.telegram_status = {}  # method -> HTTP status to answer instead (for example {"getMe": 401})
+        self.telegram_raise = None  # an exception instance to raise on every Telegram request
+        self.bot_username = "headsup_test_bot"
         self.webhook_set = False
         self.updates = []
         self.calls = []  # (method, payload) for every Telegram call
         self.github_writes = []  # every non-GET request to a GitHub host
         self.github_reads = []
+        self.github_headers = []  # the headers of every GitHub request, lower-cased
         self.decider_requests = []
         self.unexpected = []
         self.next_message_id = 100
@@ -84,6 +88,14 @@ class World:
 
     def message_id_of(self, index):
         return 100 + index
+
+    def message(self, chat, *, kind="private", name="Ada", date=1_793_620_000, update_id=None, last_name=None):
+        """A message sent to the bot, as getUpdates reports it."""
+        update_id = update_id or (len(self.updates) + 1)
+        who = {"id": chat, "type": kind, "first_name": name} if kind == "private" else {"id": chat, "type": kind, "title": name}
+        if last_name:
+            who["last_name"] = last_name
+        self.updates.append({"update_id": update_id, "message": {"message_id": update_id, "date": date, "chat": who, "from": {"id": abs(chat)}, "text": "hi"}})
 
     def tap(self, token, *, chat=CHAT, sender=CHAT, message_id=100, update_id=None):
         update_id = update_id or (len(self.updates) + 1)
@@ -110,19 +122,28 @@ class World:
         method = request.url.path.rsplit("/", 1)[-1]
         payload = json.loads(request.content or b"{}")
         self.calls.append((method, payload))
+        if self.telegram_raise is not None:
+            raise self.telegram_raise
+        if method in self.telegram_status:
+            return httpx.Response(self.telegram_status[method], json={"ok": False, "description": "made-up failure"})
+        if method == "getMe":
+            return httpx.Response(200, json={"ok": True, "result": {"id": 111222, "is_bot": True, "first_name": "Heads-Up Test", "username": self.bot_username}})
         if self.telegram_fails and method == "sendMessage":
             return httpx.Response(500, json={"ok": False})
         if method == "getUpdates":
             if self.webhook_set:
                 return httpx.Response(409, json={"ok": False, "description": "webhook is set"})
             offset = payload.get("offset", 0)
-            return httpx.Response(200, json={"ok": True, "result": [u for u in self.updates if u["update_id"] >= offset]})
+            allowed = payload.get("allowed_updates")  # like Telegram: only the kinds asked for
+            return httpx.Response(200, json={"ok": True, "result": [u for u in self.updates if u["update_id"] >= offset
+                                                                    and (not allowed or any(k in u for k in allowed))]})
         if method == "sendMessage":
             self.next_message_id += 1
             return httpx.Response(200, json={"ok": True, "result": {"message_id": self.next_message_id - 1}})
         return httpx.Response(200, json={"ok": True, "result": True})
 
     def _github(self, request):
+        self.github_headers.append({k.lower(): v for k, v in request.headers.items()})
         if self.github_raise is not None:
             self.github_reads.append(request.url.path)
             raise self.github_raise
