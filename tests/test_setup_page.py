@@ -61,3 +61,13 @@ def test_the_outcome_bar_comes_before_the_cards_in_the_real_page():
     html = render_setup_page("t", "n")
     assert html.index('id="message"') < html.index('id="app"'), "an outcome written below six cards is off screen"
     assert "#message { position:sticky; top:0" in html
+
+
+def test_the_anthropic_key_is_the_last_card_under_optional_extras_with_its_hint():
+    from headsup import config
+    field = next(f for f in config.FIELDS if f.name == "ANTHROPIC_API_KEY")
+    assert field.group == "Optional extras"
+    assert field.help == ("Optional: Claude Haiku writes friendlier alert text. Without it, everything still works; alerts use a plain template. "
+                          "Costs a fraction of a cent a day on your own Anthropic account.")
+    assert "'Judge', 'Optional extras']" in script_of(render_setup_page("t", "n")), "the last card on the page"
+    assert {f.group for f in config.FIELDS} <= {"Telegram", "GitHub", "Calendar", "Timing", "Judge", "Optional extras"}, "no setting is left without a card"

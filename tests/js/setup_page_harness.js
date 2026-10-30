@@ -70,7 +70,7 @@ function baseForm(over) {
       field('GITHUB_ACTIONS_WRITE_TOKEN', 'GitHub write token', 'GitHub', 'secret', 'missing'),
       field('ICAL_URL', 'Calendar address', 'Calendar', 'secret', 'set'),
       field('REMINDER_LEAD_MINUTES', 'Meeting reminder lead', 'Timing', 'int', 'set', { value: '30' }),
-      field('ANTHROPIC_API_KEY', 'Anthropic key', 'Haiku', 'secret', 'missing'),
+      field('ANTHROPIC_API_KEY', 'Anthropic key', 'Optional extras', 'secret', 'missing'),
       field('DECIDER_FORMAT', 'Judge question format', 'Judge', 'readonly', 'default'),
       field('DECIDER_THRESHOLD', 'Judge threshold', 'Judge', 'readonly', 'custom'),
     ],

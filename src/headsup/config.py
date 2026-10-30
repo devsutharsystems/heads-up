@@ -179,8 +179,9 @@ class SettingField:
 
 
 FIELDS = (
-    SettingField("ANTHROPIC_API_KEY", "Anthropic key (optional)", "Haiku",
-                 "Without it the alert text is a template and no Haiku call is made.", "secret"),
+    SettingField("ANTHROPIC_API_KEY", "Anthropic key (optional)", "Optional extras",
+                 "Optional: Claude Haiku writes friendlier alert text. Without it, everything still works; alerts use a plain template. "
+                 "Costs a fraction of a cent a day on your own Anthropic account.", "secret"),
     SettingField("GITHUB_TOKEN", "GitHub read token", "GitHub",
                  "A fine-grained token with read-only access. Public repositories also work without one, with lower rate limits.", "secret"),
     SettingField("GITHUB_REPOS", "Repositories to watch", "GitHub",
