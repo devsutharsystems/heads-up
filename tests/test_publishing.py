@@ -9,6 +9,8 @@ PAGE = (ROOT / "docs" / "index.html").read_text()
 README = (ROOT / "README.md").read_text()
 REPO_URL = "https://github.com/devsutharsystems/heads-up"
 PAGES_URL = "https://devsutharsystems.github.io/heads-up/"
+VIDEO_URL = "https://drive.google.com/file/d/190r72NgSdcj4ykIOoMW4Yalj7zZESEBU/view?usp=sharing"
+VIDEO_LABEL = "Demo video (2:57): setup page, a real CI failure alert in Telegram, and tapping Re-run CI"
 HEADLINE = ("the Decider scored higher than the rules on precision, recall and F1, but every gap is within the uncertainty. "
             "It is not proven better.")
 
@@ -73,7 +75,7 @@ def test_page_images_exist_and_have_alt_text():
 
 def test_page_links_go_to_the_repo_and_every_target_is_there():
     links = re.findall(r'href="([^"]+)"', PAGE)
-    assert links and all(l.startswith(REPO_URL) for l in links)
+    assert links and all(l.startswith(REPO_URL) for l in links if l != VIDEO_URL)  # the demo video is the one outside link
     for needed in ("/blob/main/README.md", "/blob/main/LEARNERS.md", "/blob/main/eval/EVAL_REPORT.md", "/tree/starter"):
         assert REPO_URL + needed in links
     for l in links:
@@ -81,8 +83,9 @@ def test_page_links_go_to_the_repo_and_every_target_is_there():
             assert (ROOT / l.split("/blob/main/")[1]).is_file(), l
 
 
-def test_page_has_the_demo_video_placeholder_and_the_required_sections():
-    assert "Demo video: link to be added." in PAGE
+def test_page_and_readme_link_the_same_demo_video_and_the_page_has_the_required_sections():
+    assert f"[{VIDEO_LABEL}]({VIDEO_URL})" in README and f'<a href="{VIDEO_URL}">{VIDEO_LABEL}</a>' in PAGE
+    assert "link to be added" not in PAGE and "DEMO VIDEO PLACEHOLDER" not in README
     for section in ("What it is", "How it works", "Results", "First live run (27 Oct 2026)", "Screenshots", "Limits and disclosures"):
         assert f">{section}</h2>" in PAGE
     assert "Inspired by Claude Duet" in PAGE

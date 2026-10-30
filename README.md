@@ -14,7 +14,7 @@ Project page: <https://devsutharsystems.github.io/heads-up/> (**live after the r
 
 *After tapping Re-run failed CI: GitHub shows Re-run triggered and attempt #2.*
 
-> **[DEMO VIDEO PLACEHOLDER: add the link here.]**
+[Demo video (2:57): setup page, a real CI failure alert in Telegram, and tapping Re-run CI](https://drive.google.com/file/d/190r72NgSdcj4ykIOoMW4Yalj7zZESEBU/view?usp=sharing)
 
 ## 1. What it is
 
@@ -134,7 +134,9 @@ Put the repo in `GITHUB_REPOS` and `GITHUB_WRITE_REPOS`.
 
 `python -m headsup --ui` starts one process that serves a dashboard at <http://127.0.0.1:8765/>, runs a check every 15 minutes (change it on the page), and listens for your Telegram button taps. If nothing answers on the Decider host, it starts `ollama serve` itself (127.0.0.1:11434, models in `.cache/ollama`, keep-alive 60 s) and stops it when you quit; an Ollama you started yourself is left alone. The CLI modes `--once` and `--listen` still expect you to start Ollama.
 
-> **[SCREENSHOT PLACEHOLDER: add `docs/screenshot-dashboard.png` here.]**
+![The local dashboard: status, today's alerts, and every decision with its score and reason](docs/screenshot-dashboard.png)
+
+*The local dashboard: status, today's alerts, and every decision with its score and reason.*
 
 **The page shows:** the judge (the Decider) up or down and whether its model is installed (if not, the exact `ollama pull` command), the last and next check and whether checks are paused, which settings are set or missing (names only), alerts today out of 5 and the spend today and in total, the last 50 events with score, decision and reason, and the alerts sent with their button state (pending, active, tapped, expired). **Buttons:** Check now, Pause or Resume automatic checks (button taps keep working while paused), and Preview, a dry run that shows what would happen and sends nothing. No button changes the Decider, the threshold or the daily limit, and Re-run CI stays a Telegram button.
 
