@@ -505,8 +505,19 @@ def test_a_file_that_cannot_be_written_is_a_generic_500_and_nothing_changed(app,
     assert a.env.read_bytes() == before and READ_TOKEN not in a.responses[-1] and len(a.built) == 1
 
 
-def test_two_saves_at_once_are_serialised_and_both_land(app):
-    a = app()
+def settle_first_check(a):
+    """The frozen test clock makes the first runner due at once, and a restart hands that due time on, so right after start a check
+    may be running and a restart would (rightly) answer "busy". Wait until the first pass is done: from then on nothing is due."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        r = a.sup.runner
+        if not r.run_lock.locked() and r.next_check > r._now():
+            return
+        time.sleep(0.01)
+    raise AssertionError("the first check never finished")
+
+
+def three_saves_at_once(a):
     results = []
 
     def go(values):
@@ -516,11 +527,37 @@ def test_two_saves_at_once_are_serialised_and_both_land(app):
                                                                 {"REMINDER_LEAD_MINUTES": "45"})]
     [t.start() for t in threads]
     [t.join() for t in threads]
+    return results
+
+
+def test_two_saves_at_once_are_serialised_and_both_land(app):
+    a = app()
+    settle_first_check(a)  # no check is running, so every restart can go ahead
+    results = three_saves_at_once(a)
     assert [s for s, _ in results] == [200, 200, 200] and all(d["applied"] for _, d in results)
     values = file_values(a)
     assert (values["GITHUB_REPOS"], values["GITHUB_WRITE_REPOS"], values["REMINDER_LEAD_MINUTES"]) == ("example-org/one", "example-org/two", "45")
     assert a.sup.settings.github_repos == ("example-org/one",) and a.sup.settings.reminder_lead_minutes == 45
     assert len(a.built) == 4 and a.sup.running()
+
+
+def test_saves_at_once_while_a_check_runs_are_all_written_say_so_truthfully_and_one_apply_activates_them(app):
+    a = app()
+    settle_first_check(a)
+    a.sup.runner.run_lock.acquire()  # a check is running
+    try:
+        results = three_saves_at_once(a)
+        assert [s for s, _ in results] == [200, 200, 200]
+        assert all(d["saved"] and d["applied"] is False and d["error"] == "busy" and d["unapplied"] for _, d in results), "nothing was activated, and each answer says so"
+        values = file_values(a)
+        assert (values["GITHUB_REPOS"], values["GITHUB_WRITE_REPOS"], values["REMINDER_LEAD_MINUTES"]) == ("example-org/one", "example-org/two", "45")
+        assert a.sup.settings.reminder_lead_minutes != 45 and len(a.built) == 1, "the running app is untouched"
+    finally:
+        a.sup.runner.run_lock.release()
+    status, data = a.post("apply")
+    assert status == 200 and data["applied"] is True and data["unapplied"] is False
+    s = a.sup.settings
+    assert s.github_repos == ("example-org/one",) and s.reminder_lead_minutes == 45 and a.sup.running()
 
 
 # ---------------------------------------------------------------------------------------------------------- the Telegram helper
