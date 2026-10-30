@@ -131,7 +131,7 @@ def run_ui(settings, *, out, port=PORT, client=None, db_path=None, now=None, ins
     open_store = (lambda: Store(db_path)) if db_path else Store
     supervisor = Supervisor(lambda s: build_runner(s, client=client, open_store=open_store, now=now), settings)
     child = OllamaChild(client, settings.decider_host)
-    setup_service = SetupService(supervisor, client, **({} if env_path is None else {"env_path": env_path}))
+    setup_service = SetupService(supervisor, client, open_store=open_store, now=now, **({} if env_path is None else {"env_path": env_path}))
     ctx = Context(runner=supervisor.runner, open_store=open_store, setup_status=setting_status, health=child.health, now=now,
                   setup_service=setup_service)
     supervisor.on_swap = lambda runner: setattr(ctx, "runner", runner)  # handlers read ctx.runner on every request

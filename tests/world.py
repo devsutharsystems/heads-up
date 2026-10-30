@@ -134,6 +134,8 @@ class World:
             if self.webhook_set:
                 return httpx.Response(409, json={"ok": False, "description": "webhook is set"})
             offset = payload.get("offset", 0)
+            if offset:  # like Telegram: an offset confirms and FORGETS every earlier update, whatever its kind
+                self.updates = [u for u in self.updates if u["update_id"] >= offset]
             allowed = payload.get("allowed_updates")  # like Telegram: only the kinds asked for
             return httpx.Response(200, json={"ok": True, "result": [u for u in self.updates if u["update_id"] >= offset
                                                                     and (not allowed or any(k in u for k in allowed))]})

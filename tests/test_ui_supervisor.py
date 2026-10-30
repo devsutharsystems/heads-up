@@ -18,6 +18,8 @@ class FakeRunner:
 
     def __init__(self, name, behaviour=None):
         self.name, self.paused, self.last = name, False, None
+        self.telegram_ready, self.next_check = True, f"next-check-of-{name}"
+        self.run_lock = threading.Lock()  # held for the length of a check, like the real Runner's
         self.check_requested = threading.Event()
         self.in_check, self.release = threading.Event(), threading.Event()
         self.runs, self.exits = 0, 0
@@ -38,8 +40,9 @@ def idle(runner, stop):
 
 def long_check(runner, stop):
     """A check in progress: it ignores `stop` until it is released, like a real pass does."""
-    runner.in_check.set()
-    runner.release.wait(10)
+    with runner.run_lock:
+        runner.in_check.set()
+        runner.release.wait(10)
     idle(runner, stop)
 
 
@@ -137,16 +140,18 @@ def test_what_should_survive_a_restart_does():
     sup.shutdown()
 
 
-def test_a_running_check_is_waited_for_when_it_finishes_in_time():
-    sup, built = supervisor(lambda s: FakeRunner(s, long_check if s == "first" else idle), join_timeout=2.0)
+def test_a_running_check_makes_a_restart_answer_busy_at_once_instead_of_waiting():
+    sup, built = supervisor(lambda s: FakeRunner(s, long_check if s == "first" else idle), join_timeout=5.0)
     sup.start()
     old = sup.runner
     assert old.in_check.wait(2)
-    threading.Timer(0.15, old.release.set).start()
     started = time.monotonic()
-    assert sup.restart("second").status == "ok"
-    assert 0.1 < time.monotonic() - started < 2.0, "it waited for the check"
-    assert sup.runner is not old and sup.settings == "second"
+    assert sup.restart("second") == RestartResult("busy")
+    assert time.monotonic() - started < 0.2, "no waiting for a pass that can take minutes"
+    assert sup.runner is old and sup.settings == "first" and [s for s, _ in built] == ["first"] and old.exits == 0 and sup.running()
+    old.release.set()
+    assert wait_until(lambda: not old.run_lock.locked())
+    assert sup.restart("second").status == "ok", "and once the check is over the restart goes through"
     sup.shutdown()
 
 
@@ -162,7 +167,7 @@ def test_a_check_that_outlasts_the_wait_leaves_everything_as_it_was_and_the_old_
     assert sup.running()
     old.release.set()
     time.sleep(0.15)
-    assert sup.running() and old.exits == 0, "the stop request was withdrawn: the worker is still serving the old runner"
+    assert sup.running() and old.exits == 0, "the worker is still serving the old runner"
     sup.shutdown()
 
 
@@ -217,63 +222,47 @@ def test_two_restarts_at_once_are_serialised_and_the_last_wins():
     sup.shutdown()
 
 
-# ------------------------------------------------------------------------------------------------ suspend for the chat finder
-def test_suspend_stops_the_worker_and_resume_starts_it_again_on_the_same_runner():
-    sup, _ = supervisor()
-    sup.start()
-    runner = sup.runner
-    assert wait_until(lambda: runner.runs == 1)
-    assert sup.suspend() is True and not sup.running()
-    assert sup.suspend() is True, "suspending twice is fine"
-    sup.resume()
-    sup.resume()
-    assert wait_until(lambda: runner.runs == 2) and len(alive_workers()) == 1 and sup.runner is runner
-    sup.shutdown()
-
-
-def test_suspend_reports_busy_while_a_check_runs_and_the_worker_is_left_alone():
-    sup, _ = supervisor(lambda s: FakeRunner(s, long_check), join_timeout=0.2, grace=0.2)
-    sup.start()
-    assert sup.runner.in_check.wait(2)
-    assert sup.suspend() is False and sup.running()
-    sup.runner.release.set()
-    sup.shutdown()
-
-
-def test_with_a_real_runner_no_telegram_polling_happens_while_suspended(tmp_path):
-    polls = []
-
-    def listen(app, minutes):
-        polls.append(time.monotonic())
-        time.sleep(0.01)
-        return 0
-
-    path = tmp_path / "t.db"
-    sup = Supervisor(lambda s: make_runner(path, run_once=FakeRun(), listen=listen), "settings", join_timeout=5.0)
-    sup.start()
-    assert wait_until(lambda: len(polls) >= 3)
-    assert sup.suspend() is True
-    count = len(polls)
-    time.sleep(0.3)
-    assert len(polls) == count, "the worker is gone: no getUpdates can collide with the finder"
-    sup.resume()
-    assert wait_until(lambda: len(polls) > count)
-    sup.shutdown()
-
-
-def test_with_real_runners_the_new_one_runs_its_first_check_at_once_and_a_pause_survives(tmp_path):
+# ------------------------------------------------------------------------------------------------ a restart is not a check
+def test_a_restart_does_not_start_a_check_and_a_pause_survives(tmp_path):
     path = tmp_path / "t.db"
     runs = {"first": FakeRun(), "second": FakeRun()}
     sup = Supervisor(lambda s: make_runner(path, run_once=runs[s]), "first", join_timeout=5.0)
     sup.start()
     assert wait_until(lambda: runs["first"].calls == 1)
     sup.runner.pause()
+    due = sup.runner.next_check
     assert sup.restart("second").status == "ok"
-    time.sleep(0.2)
-    assert isinstance(sup.runner, Runner) and sup.runner.paused is True and runs["second"].calls == 0, "paused stays paused"
+    time.sleep(0.3)
+    assert isinstance(sup.runner, Runner) and sup.runner.paused is True and sup.runner.next_check == due and runs["second"].calls == 0
     sup.runner.resume()
-    assert wait_until(lambda: runs["second"].calls == 1)
+    time.sleep(0.3)
+    assert runs["second"].calls == 0, "resuming does not pull the next check forward past the saved time either"
     sup.shutdown()
+
+
+def test_saving_while_running_normally_does_not_run_a_pass_but_the_first_setup_does(tmp_path):
+    path = tmp_path / "t.db"
+    runs = {"a": FakeRun(), "b": FakeRun(), "c": FakeRun()}
+    ready = {"a": True, "b": True, "c": True}
+    sup = Supervisor(lambda s: make_runner(path, run_once=runs[s], telegram_ready=ready[s]), "a", join_timeout=5.0)
+    sup.start()
+    assert wait_until(lambda: runs["a"].calls == 1)
+    assert sup.restart("b").status == "ok"
+    time.sleep(0.3)
+    assert runs["b"].calls == 0, "a save is not a reason to check now"
+    sup.shutdown()
+    # a runner that was idle (Telegram not set up) hands over to one that is ready: that one checks at once
+    ready.update(a=False, c=True)
+    idle_sup = Supervisor(lambda s: make_runner(path, run_once=runs[s], telegram_ready=ready[s]), "a", join_timeout=5.0)
+    idle_sup.start()
+    assert idle_sup.restart("c").status == "ok"
+    assert wait_until(lambda: runs["c"].calls == 1)
+    idle_sup.shutdown()
+
+
+def test_the_worker_listens_in_two_second_slices_so_a_requested_check_starts_quickly():
+    from headsup import ui_runner
+    assert round(ui_runner.LISTEN_SLICE_MIN * 60, 3) == 2.0
 
 
 def test_the_server_context_follows_the_swap(tmp_path):

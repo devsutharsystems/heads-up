@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from headsup.telegram import TelegramError
+from headsup.telegram import TelegramError, chat_from_update
 
 ALLOWED_ACTIONS = ("snooze_1h", "remind_later", "rerun_failed_ci")
 LABELS = {"snooze_1h": "Snooze 1h", "remind_later": "Remind in 2h", "rerun_failed_ci": "Re-run CI"}
@@ -121,7 +121,19 @@ class ActionHandler:
             self.telegram.confirm(update["update_id"])
         return outcomes
 
+    def _note_sender(self, update):
+        """A message to the bot: keep who wrote (id, first name, time) for ten minutes so the setup page can offer them. The text is
+        never read, stored, logged or acted on, and the message gets no answer."""
+        seen = chat_from_update(update)
+        if seen is not None:
+            chat_id, name, sent = seen
+            now = self._now()
+            self.store.note_chat(chat_id, name, sent or now, now)
+
     def handle_update(self, update):
+        if isinstance(update, dict) and "message" in update:
+            self._note_sender(update)
+            return None
         cq = update.get("callback_query")
         if not isinstance(cq, dict):
             return None

@@ -13,8 +13,10 @@ from types import SimpleNamespace
 import pytest
 from dotenv import dotenv_values
 
+from headsup import __main__ as cli
 from headsup import config, setup_checks
 from headsup.setup_service import PENDING_SECONDS, SetupService
+from headsup.store import Store
 from headsup.ui_server import GET_JSON, POST_ROUTES, SETUP_BODY_LIMITS, SETUP_ROUTES, MAX_BODY
 from headsup.ui_supervisor import Supervisor
 from ui_world import FakeRun, Live, make_runner
@@ -317,7 +319,7 @@ def test_the_dashboard_links_to_settings_and_says_what_is_missing(tmp_path):
 def app(tmp_path):
     made = []
 
-    def build(env_values=INITIAL, *, run_once=None, factory_fail=None, join_timeout=5.0, monotonic=None, world=None, supervisor_kw=None):
+    def build(env_values=INITIAL, *, run_once=None, factory_fail=None, join_timeout=5.0, monotonic=None, world=None, supervisor_kw=None, real=False):
         env = tmp_path / ".env"
         if env_values:
             config.save_env(env_values, env_path=env)
@@ -330,10 +332,12 @@ def app(tmp_path):
                 raise RuntimeError("could not build: " + (s.telegram_bot_token or ""))
             built.append(s)
             ready = s.telegram_bot_token is not None and s.telegram_chat_id is not None
+            if real:  # the production runner: it really polls the fake Telegram and keeps who wrote
+                return cli.build_runner(s, client=world.client, open_store=lambda: Store(db), now=lambda: datetime.now(timezone.utc))
             return make_runner(db, run_once=run_once or FakeRun(), telegram_ready=ready)
 
         sup = Supervisor(factory, first, join_timeout=join_timeout, **(supervisor_kw or {}))
-        service = SetupService(sup, world.client, env_path=env, **({"monotonic": monotonic} if monotonic else {}))
+        service = SetupService(sup, world.client, env_path=env, open_store=lambda: Store(db), **({"monotonic": monotonic} if monotonic else {}))
         live = Live(db, sup.runner, setup_service=service)
         sup.on_swap = lambda runner: setattr(live.ctx, "runner", runner)
         sup.start()
@@ -548,7 +552,7 @@ def test_one_private_chat_is_offered_for_confirmation_not_saved(app, monkeypatch
     assert data["choices"] == [{"index": 0, "name": "Ada Lovelace", "last": datetime.fromtimestamp(1_793_620_000, tz=timezone.utc).isoformat()}]
     assert "999000111" not in a.responses[-1], "the chat id never reaches the browser"
     assert "TELEGRAM_CHAT_ID" not in file_values(a) or not file_values(a)["TELEGRAM_CHAT_ID"], "nothing is saved until the user confirms"
-    assert seen == [False] and a.sup.running(), "the worker was stopped while Telegram was asked, and started again"
+    assert seen == [True] and a.sup.running(), "the worker was never stopped: it is idle without a chat ID, so nobody else is polling"
     assert a.world.calls[-1] == ("getUpdates", {"timeout": 0, "allowed_updates": ["message"]})
 
 
@@ -586,14 +590,87 @@ def test_the_finder_reports_nothing_found_a_webhook_and_a_busy_worker(app):
     assert "deleteWebhook" not in a.world.methods()
 
 
-def test_the_finder_does_not_stop_a_running_check_it_says_busy(app):
+def test_the_finder_answers_at_once_from_what_the_worker_saw_even_while_a_check_runs(app):
     release, started = threading.Event(), threading.Event()
-    a = app(env_values=INITIAL, run_once=lambda application: (started.set(), release.wait(10), {})[2], join_timeout=0.3, supervisor_kw={"grace": 0.2})
+    a = app(env_values=INITIAL, run_once=lambda application: (started.set(), release.wait(10), {})[2])
     assert started.wait(3)
+    began = time.monotonic()
     status, data = a.post("find-chat")
-    assert status == 409 and data["status"] == "busy" and a.sup.running()
-    assert "getUpdates" not in a.world.methods(), "Telegram was not asked while a check was running"
+    assert time.monotonic() - began < 1.0 and status == 200 and data["status"] == "none" and "10 minutes" in data["message"]
+    assert a.sup.running() and "getUpdates" not in a.world.methods(), "Telegram was not asked: the worker is the one that polls"
+    store = Store(a.tmp / "t.db")
+    store.note_chat(999000111, "Ada", datetime.now(timezone.utc), datetime.now(timezone.utc))
+    store.close()
+    status, data = a.post("find-chat")
+    assert status == 200 and data["status"] == "choose" and data["single"] is True and [c["name"] for c in data["choices"]] == ["Ada"]
+    assert "999000111" not in a.responses[-1] and "getUpdates" not in a.world.methods()
     release.set()
+
+
+def test_the_finder_does_not_wait_for_a_save_in_progress_or_hold_the_settings_lock(app):
+    a = app(env_values={"TELEGRAM_BOT_TOKEN": BOT, "GITHUB_REPOS": REPO})
+    a.world.message(999000111, name="Ada")
+    with a.service._lock:  # a save is in the middle of its restart
+        began = time.monotonic()
+        status, data = a.post("find-chat")
+        assert time.monotonic() - began < 1.0 and status == 200 and data["status"] == "choose"
+    assert a.post("use-chat", {"index": 0})[1]["status"] == "saved", "and choosing still works once the save is done"
+
+
+def test_the_finder_with_a_ready_worker_never_confirms_or_asks_telegram_even_for_a_waiting_tap(app):
+    a = app(env_values=INITIAL)
+    a.post("find-chat")
+    a.post("find-chat")
+    assert "getUpdates" not in a.world.methods()
+
+
+def test_a_message_the_running_worker_saw_is_offered_even_after_a_button_tap_confirmed_a_later_update(app):
+    """The live bug, end to end with the production worker: "hi", then a later update that gets confirmed (in the live case a tap on an
+    alert; here a group message, which needs no tap handling), then Find my chat ID. The tap itself is tested in test_seen_chats.py."""
+    a = app(env_values=INITIAL, real=True)
+    a.world.message(999000111, name="Ada", update_id=500, date=int(time.time()))
+    a.world.message(-100555, kind="supergroup", name="Team", update_id=501, date=int(time.time()))  # a later update, confirmed too (offset 502)
+    deadline = time.monotonic() + 15
+    store = Store(a.tmp / "t.db")
+    try:
+        while store.get_kv("telegram_offset") != "502" and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert store.get_kv("telegram_offset") == "502"
+    finally:
+        store.close()
+    while any(u["update_id"] < 502 for u in a.world.updates) and time.monotonic() < deadline:  # the worker's next poll sends offset 502
+        time.sleep(0.05)
+    assert not [u for u in a.world.updates if u["update_id"] < 502], "Telegram has forgotten the message, as it does after a confirmed tap"
+    status, data = a.post("find-chat")
+    assert status == 200 and data["status"] == "choose" and data["single"] is True and [c["name"] for c in data["choices"]] == ["Ada"]
+    assert "999000111" not in a.responses[-1]
+
+
+def test_apply_and_save_say_busy_at_once_while_a_check_runs(app):
+    release, started = threading.Event(), threading.Event()
+    a = app(env_values=INITIAL, run_once=lambda application: (started.set(), release.wait(10), {})[2], join_timeout=30.0)
+    assert started.wait(3)
+    began = time.monotonic()
+    status, data = a.post("save", {"values": {"GITHUB_REPOS": "example-org/one"}})
+    assert time.monotonic() - began < 1.0, "no waiting for the check"
+    assert status == 200 and data["saved"] is True and data["applied"] is False and data["error"] == "busy"
+    began = time.monotonic()
+    status, data = a.post("apply")
+    assert time.monotonic() - began < 1.0 and data["error"] == "busy" and a.sup.running()
+    release.set()
+
+
+def test_a_save_while_things_run_normally_does_not_start_a_check(app):
+    runs = FakeRun()
+    a = app(env_values=INITIAL, run_once=runs)
+    deadline = time.monotonic() + 3
+    while runs.calls < 1 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert runs.calls == 1
+    status, data = a.post("save", {"values": {"GITHUB_REPOS": "example-org/one"}})
+    assert data["applied"] is True
+    time.sleep(0.5)
+    assert runs.calls == 1, "saving a setting did not run a pass"
 
 
 @pytest.mark.parametrize("body", [{"index": True}, {"index": "0"}, {"index": 1.5}, {"index": None}, {}, {"index": 0, "extra": 1}, {"index": -1}, {"index": 5}])
@@ -621,16 +698,72 @@ def test_the_test_message_is_one_fixed_text_to_the_saved_chat_and_is_rate_limite
     clock = SimpleNamespace(now=100.0)
     a = app(monotonic=lambda: clock.now)
     status, data = a.post("test-message")
-    assert status == 200 and data == {"ok": True, "message": "Sent. Check Telegram."} and a.world.sent() == [{"chat_id": CHAT, "text": setup_checks.TEST_TEXT}]
+    assert status == 200 and data["ok"] is True and data["status"] == "sent" and data["message"].startswith("SENT: Telegram accepted the test message (message number ")
+    assert a.world.sent() == [{"chat_id": CHAT, "text": setup_checks.TEST_TEXT}]
+    clock.now += 2
     status, data = a.post("test-message")
-    assert status == 429 and data["ok"] is False and len(a.world.sent()) == 1
-    clock.now += 5.1
+    assert status == 429 and data["ok"] is False and data["status"] == "too_soon" and "Wait 3 seconds" in data["message"] and len(a.world.sent()) == 1
+    clock.now += 3.1
     assert a.post("test-message")[0] == 200 and len(a.world.sent()) == 2
 
 
 def test_the_test_message_needs_a_saved_chat(app):
     a = app(env_values={"TELEGRAM_BOT_TOKEN": BOT, "GITHUB_REPOS": REPO})
-    assert a.post("test-message")[1] == {"ok": False, "message": "Save the bot token and the chat ID first."} and a.world.sent() == []
+    assert a.post("test-message")[1] == {"ok": False, "status": "not_configured",
+                                         "message": "NOT SENT (not_configured): Save the bot token and the chat ID first."} and a.world.sent() == []
+
+
+def test_a_failed_test_message_does_not_start_the_wait_and_says_which_failure_it_was(app):
+    clock = SimpleNamespace(now=100.0)
+    a = app(monotonic=lambda: clock.now)
+    a.world.telegram_status["sendMessage"] = 403
+    status, data = a.post("test-message")
+    assert status == 200 and data["ok"] is False and data["status"] == "http_403" and data["message"].startswith("NOT SENT (http_403): ")
+    a.world.telegram_status.clear()
+    status, data = a.post("test-message")  # straight away: nothing went out, so nothing makes it wait
+    assert status == 200 and data["status"] == "sent"
+
+
+def test_a_test_message_with_unapplied_settings_says_so_in_its_own_words(app):
+    a = app(env_values=INITIAL, run_once=lambda application: (time.sleep(0.5), {})[1], join_timeout=30.0)
+    a.post("save", {"values": {"GITHUB_REPOS": "example-org/one"}})
+    status, data = a.post("test-message")
+    assert status == 409 and data["status"] == "unapplied" and data["message"].startswith("NOT SENT (unapplied): ") and a.world.sent() == []
+
+
+def test_two_test_messages_at_once_are_told_apart(app, monkeypatch):
+    a = app()
+    inside, release = threading.Event(), threading.Event()
+    real = setup_checks.send_test
+
+    def slow(settings, client):
+        inside.set()
+        release.wait(5)
+        return real(settings, client)
+
+    monkeypatch.setattr(setup_checks, "send_test", slow)
+    first = threading.Thread(target=lambda: a.post("test-message"))
+    first.start()
+    assert inside.wait(3)
+    status, data = a.post("test-message")
+    assert status == 409 and data["status"] == "in_progress" and data["message"].startswith("NOT SENT (in_progress): ")
+    release.set()
+    first.join()
+    assert len(a.world.sent()) == 1
+
+
+def test_every_test_message_outcome_has_a_different_message(app):
+    seen = {}
+    clock = SimpleNamespace(now=100.0)
+    a = app(monotonic=lambda: clock.now)
+    seen["sent"] = a.post("test-message")[1]["message"].split("(")[0]
+    clock.now += 0.1
+    seen["too_soon"] = a.post("test-message")[1]["message"]
+    for status in (400, 401, 403, 404):
+        clock.now += 10
+        a.world.telegram_status["sendMessage"] = status
+        seen[f"http_{status}"] = a.post("test-message")[1]["message"]
+    assert len(set(seen.values())) == len(seen) == 6
 
 
 # ---------------------------------------------------------------------------------------------------------- the connection test

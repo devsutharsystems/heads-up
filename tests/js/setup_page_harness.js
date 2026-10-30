@@ -30,7 +30,7 @@ class El {
   replaceChildren(...nodes) { this.children = []; this.append(...nodes.filter((n) => n !== '')); }
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   focus() { this.ownerDocument.active = this; }
-  async click() { for (const f of this.listeners.click || []) await f({ type: 'click', target: this, preventDefault() {} }); }
+  async click() { for (const f of this.listeners.click || []) await f({ type: 'click', target: this, currentTarget: this, preventDefault() {} }); }
   get textContent() { return this.children.map((c) => c.textContent).join(''); }
   set textContent(v) { this.children = String(v) === '' ? [] : [new Text(v)]; }
   all(out = []) { for (const c of this.children) if (c.nodeType === 1) { out.push(c); c.all(out); } return out; }
@@ -87,15 +87,23 @@ async function boot(form, routes) {
     calls.push({ url, method, headers: init.headers || {}, body: init.body === undefined ? undefined : JSON.parse(init.body) });
     if (routes.__throw) throw new TypeError('Failed to fetch');
     const key = method + ' ' + url;
+    if (routes[key] === 'throw') throw new TypeError('Failed to fetch');  // the app is gone for this one route
+    if (routes[key] === 'hang') {  // never answers; the page's own 60 s timer aborts it
+      await new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    }
     const handler = key === 'GET /api/setup-form' ? () => [200, form] : routes[key];
     if (!handler) return { status: 404, json: async () => ({ message: 'not found' }) };
     const [status, data] = await handler(init.body === undefined ? undefined : JSON.parse(init.body));
     return { status, json: async () => data };
   };
-  const sandbox = { document: doc, fetch: fetchFake, JSON, Object, Array, String, Promise, Map, Set, console: { log() {}, error() {} } };
+  // The page's one-minute request timer is recorded, not run: a test fires it by hand (and Node is not kept waiting for it).
+  const timers = [];
+  const fakeSetTimeout = (f, ms) => { if (ms >= 60000) { const rec = { f, ms, cleared: false }; timers.push(rec); return rec; } return setTimeout(f, ms); };
+  const fakeClearTimeout = (h) => { if (h && typeof h === 'object' && 'cleared' in h) h.cleared = true; else clearTimeout(h); };
+  const sandbox = { document: doc, fetch: fetchFake, JSON, Object, Array, String, Promise, Map, Set, AbortController, setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout, console: { log() {}, error() {} } };
   vm.runInNewContext(script, sandbox);
   await settle();
-  return { doc, calls, byId: (id) => doc.getElementById(id), buttonLabelled: (label) => doc.body.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === label)[0] || null,
+  return { doc, calls, timers, byId: (id) => doc.getElementById(id), buttonLabelled: (label) => doc.body.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === label)[0] || null,
            text: () => doc.body.textContent, posts: () => calls.filter((c) => c.method === 'POST') };
 }
 
@@ -244,34 +252,113 @@ async function scenario(name, fn) {
 
   await scenario('Test connection lists every check and marks Haiku and the write token as not tested', async () => {
     const t = await boot(baseForm(), { 'POST /api/setup/test-connection': () => [200, { ok: true, github: [{ name: 'a/b', ok: true, message: 'OK' }, { name: 'c/d', ok: false, message: 'HTTP 404 (repository not found, or the token cannot see it)' }],
-      calendar: { configured: true, ok: true, message: 'readable' }, telegram: { configured: true, ok: true, message: 'OK, bot @x' }, haiku: { tested: false, message: 'not tested: a test call would use your Anthropic credit' }, writeToken: { tested: false, message: 'not tested: it can only be tested by re-running a build' } }] });
+      calendar: { configured: true, ok: true, message: 'OK, calendar readable' }, telegram: { configured: true, ok: true, message: 'OK, bot @x' }, haiku: { tested: false, message: 'not tested: a test call would use your Anthropic credit' }, writeToken: { tested: false, message: 'not tested: it can only be tested by re-running a build' } }] });
     await t.byId('test').click();
     await settle();
     const lines = t.byId('results').children.map((li) => li.textContent);
-    eq(lines, ['OKGitHub a/b: OK', 'ProblemGitHub c/d: HTTP 404 (repository not found, or the token cannot see it)', 'OKCalendar: readable', 'OKTelegram: OK, bot @x',
+    eq(lines, ['OKGitHub a/b: OK', 'ProblemGitHub c/d: HTTP 404 (repository not found, or the token cannot see it)', 'OKCalendar: OK, calendar readable', 'OKTelegram: OK, bot @x',
       'Not testedHaiku: not tested: a test call would use your Anthropic credit', 'Not testedWrite token: not tested: it can only be tested by re-running a build']);
   });
 
   await scenario('the test message button posts one empty request and shows the answer', async () => {
-    const t = await boot(baseForm(), { 'POST /api/setup/test-message': () => [200, { ok: true, message: 'Sent. Check Telegram.' }] });
+    const t = await boot(baseForm(), { 'POST /api/setup/test-message': () => [200, { ok: true, status: 'sent', message: 'SENT: Telegram accepted the test message (message number 3). Look in your chat with the bot.' }] });
     await t.buttonLabelled('Send test message').click();
     await settle();
-    eq(t.posts().map((p) => [p.url, p.body]), [['/api/setup/test-message', {}]]); assert(t.text().includes('Sent. Check Telegram.'));
+    eq(t.posts().map((p) => [p.url, p.body]), [['/api/setup/test-message', {}]]); assert(t.text().includes('SENT: Telegram accepted'));
   });
 
-  await scenario('buttons are disabled while a request runs, so a double click sends one request', async () => {
+  await scenario('a helper button disables only itself while it runs, shows what it is doing, and a double click sends one request', async () => {
     let release;
     const gate = new Promise((r) => { release = r; });
-    const t = await boot(baseForm(), { 'POST /api/setup/test-message': async () => { await gate; return [200, { ok: true, message: 'Sent.' }]; } });
+    const t = await boot(baseForm(), { 'POST /api/setup/test-message': async () => { await gate; return [200, { ok: true, status: 'sent', message: 'SENT: Telegram accepted the test message (message number 7). Look in your chat with the bot.' }]; } });
     const first = t.buttonLabelled('Send test message').click();
     await settle();
-    assert(t.doc.querySelectorAll('button').every((b) => b.disabled), 'every button is disabled meanwhile');
+    assert(t.buttonLabelled('Send test message').disabled, 'the clicked button is disabled');
+    assert(t.doc.querySelectorAll('button').filter((b) => b !== t.buttonLabelled('Send test message')).every((b) => !b.disabled), 'every other button stays usable');
+    assert(t.text().includes('Sending the test message...'), 'and the page says what it is doing');
     await t.buttonLabelled('Send test message').click();
     release();
     await first;
     await settle();
     eq(t.posts().length, 1);
-    assert(t.doc.querySelectorAll('button').every((b) => !b.disabled), 'and enabled again afterwards');
+    assert(t.doc.querySelectorAll('button').every((b) => !b.disabled), 'enabled again afterwards');
+    assert(t.text().includes('SENT: Telegram accepted'));
+  });
+
+  await scenario('saving still locks every button until the answer arrives', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const t = await boot(baseForm(), { 'POST /api/setup/save': async () => { await gate; return [200, { ok: true, saved: false, message: 'Nothing to save.' }]; } });
+    const first = t.byId('save').click();
+    await settle();
+    assert(t.doc.querySelectorAll('button').every((b) => b.disabled), 'every button is disabled meanwhile');
+    release();
+    await first;
+    await settle();
+    assert(t.doc.querySelectorAll('button').every((b) => !b.disabled));
+  });
+
+  await scenario('find my chat ID says it is looking, while the other buttons stay usable', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const t = await boot(baseForm(), { 'POST /api/setup/find-chat': async () => { await gate; return [200, { ok: false, status: 'none', message: 'No message from the last 10 minutes.' }]; } });
+    const first = t.buttonLabelled('Find my chat ID').click();
+    await settle();
+    assert(t.text().includes('Looking for messages sent to your bot...') && !t.byId('test').disabled && !t.byId('save').disabled);
+    release();
+    await first;
+    await settle();
+    assert(t.text().includes('No message from the last 10 minutes.') && !t.text().includes('Looking for messages'));
+  });
+
+  await scenario('Test connection shows three waiting lines, then the real ones with their times', async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const t = await boot(baseForm(), { 'POST /api/setup/test-connection': async () => { await gate; return [200, { ok: true, github: [{ name: 'a/b', ok: true, message: 'OK' }],
+      calendar: { configured: true, ok: true, message: 'OK, calendar readable' }, telegram: { configured: true, ok: true, message: 'OK, bot @x' },
+      timing_ms: { github: 320, calendar: 1840, telegram: 510 }, haiku: { message: 'h' }, writeToken: { message: 'w' } }]; } });
+    const first = t.byId('test').click();
+    await settle();
+    eq(t.byId('results').children.map((li) => li.textContent), ['TestingGitHub: waiting for the answer...', 'TestingCalendar: waiting for the answer...', 'TestingTelegram: waiting for the answer...']);
+    assert(t.byId('test').disabled && !t.byId('save').disabled);
+    release();
+    await first;
+    await settle();
+    eq(t.byId('results').children.map((li) => li.textContent).slice(0, 3), ['OKGitHub a/b: OK (0.3 s)', 'OKCalendar: OK, calendar readable (1.8 s)', 'OKTelegram: OK, bot @x (0.5 s)']);
+  });
+
+  await scenario('every outcome of Send test message is shown with its own words', async () => {
+    const outcomes = [
+      [200, { ok: true, status: 'sent', message: 'SENT: Telegram accepted the test message (message number 9). Look in your chat with the bot.' }, 'SENT: Telegram accepted'],
+      [200, { ok: false, status: 'not_configured', message: 'NOT SENT (not_configured): Save the bot token and the chat ID first.' }, 'NOT SENT (not_configured)'],
+      [409, { ok: false, status: 'unapplied', message: 'NOT SENT (unapplied): the saved settings are not active yet. Press Apply first.' }, 'NOT SENT (unapplied)'],
+      [429, { ok: false, status: 'too_soon', message: 'NOT SENT (too_soon): a test message went out a moment ago. Wait 4 seconds and try again.' }, 'NOT SENT (too_soon)'],
+      [200, { ok: false, status: 'http_403', message: 'NOT SENT (http_403): Telegram answered HTTP 403: the bot cannot write to this chat. Open the bot in Telegram and press Start.' }, 'NOT SENT (http_403)'],
+      [200, { ok: false, status: 'network', message: 'NOT SENT (network): Could not reach Telegram (network error).' }, 'NOT SENT (network)'],
+    ];
+    for (const [status, body, expect] of outcomes) {
+      const t = await boot(baseForm(), { 'POST /api/setup/test-message': () => [status, body] });
+      await t.buttonLabelled('Send test message').click(); await settle();
+      assert(t.text().includes(expect), 'shows: ' + expect);
+    }
+  });
+
+  await scenario('Send test message tells a dead app, a timeout and a bare answer apart', async () => {
+    const down = await boot(baseForm(), { 'POST /api/setup/test-message': 'throw' });
+    await down.buttonLabelled('Send test message').click(); await settle();
+    assert(down.text().includes('NOT SENT (no_connection): Could not reach the app. Is it still running?'), 'a dead app: ' + down.text().slice(-200));
+    const gone = await boot(baseForm(), { 'POST /api/setup/test-message': () => [502, {}] });
+    await gone.buttonLabelled('Send test message').click(); await settle();
+    assert(gone.text().includes('NOT SENT (no_message): the app answered HTTP 502 without a message.'), 'a bare answer: ' + gone.text().slice(-200));
+    const hung = await boot(baseForm(), { 'POST /api/setup/test-message': 'hang' });
+    const pending = hung.buttonLabelled('Send test message').click();
+    await settle();
+    const live = hung.timers.filter((x) => !x.cleared);
+    eq(live.length, 1, 'one running request timer of a minute');
+    live[0].f();
+    await pending; await settle();
+    assert(hung.text().includes('NOT SENT (no_answer): The app did not answer within a minute.'), 'a timeout: ' + hung.text().slice(-200));
+    assert(!hung.buttonLabelled('Send test message').disabled, 'and the button is usable again');
   });
 
   await scenario('a key typed on the page is sent once, in the save request, and in no other request', async () => {
@@ -306,7 +393,7 @@ async function scenario(name, fn) {
     await t.byId('save').click(); await settle();
     assert(t.text().includes('Something went wrong.'), 'a 500 with no message');
     await t.buttonLabelled('Send test message').click(); await settle();
-    assert(t.text().includes('No answer.'), 'a test-message answer with no message');
+    assert(t.text().includes('NOT SENT (no_message): the app answered HTTP 200 without a message.'), 'a test-message answer with no message');
   });
 
   await scenario('a shell override is named on the field, and the page says the shell wins', async () => {

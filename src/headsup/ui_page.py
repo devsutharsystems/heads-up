@@ -199,11 +199,18 @@ function applyFilter() {
 function relTimes() {
   document.querySelectorAll('time[data-rel]').forEach(t => { const d = new Date(t.dateTime); if (!isNaN(d)) t.textContent = rel(d); });
 }
+// A click on Check now queues a pass; the worker starts it within a couple of seconds. Until the page sees it start (or finish, which
+// changes the last-check time) the button keeps saying so, and the page asks for news every second instead of every five.
+let queuedAt = 0, lastSeen = null, running = false;
 function syncState() {
   const st = document.querySelector('#live [data-running]');
-  const running = !!st && st.dataset.running === '1', enabled = !st || st.dataset.enabled === '1';
-  checkBtn.textContent = running ? 'Checking...' : 'Check now';
-  checkBtn.disabled = running || !enabled;
+  running = !!st && st.dataset.running === '1';
+  const enabled = !st || st.dataset.enabled === '1', last = st ? st.dataset.last : null;
+  if (queuedAt && (running || (lastSeen !== null && last !== lastSeen) || Date.now() - queuedAt > 20000)) queuedAt = 0;
+  lastSeen = last;
+  const busy = running || queuedAt > 0;
+  checkBtn.textContent = busy ? 'Checking...' : 'Check now';
+  checkBtn.disabled = busy || !enabled;
   previewBtn.disabled = running;
   const src = document.querySelector('#live [data-pills]');
   if (src) document.getElementById('pills').innerHTML = src.innerHTML;
@@ -220,11 +227,11 @@ document.addEventListener('click', async (ev) => {
   const a = b.dataset.action; msg.textContent = '';
   if (a === 'interval') { const [s, d] = await post('/api/interval', {minutes: Number(document.getElementById('interval').value)}); msg.textContent = d.message || ''; }
   else if (a === 'preview') { msg.textContent = 'Running a dry run...'; previewBtn.disabled = true; const [s, d] = await post('/api/preview'); msg.textContent = d.message || ''; document.getElementById('preview').textContent = (d.lines || []).join('\\n'); }
-  else { const [s, d] = await post('/api/' + a); msg.textContent = d.message || ''; if (a === 'check' && s === 202) { checkBtn.textContent = 'Checking...'; checkBtn.disabled = true; } }
+  else { const [s, d] = await post('/api/' + a); msg.textContent = d.message || ''; if (a === 'check' && s === 202) { queuedAt = Date.now(); checkBtn.textContent = 'Checking...'; checkBtn.disabled = true; } }
   refresh();
 });
 syncState();
-setInterval(refresh, 5000);
+(function poll() { refresh().finally(() => setTimeout(poll, running || queuedAt ? 1000 : 5000)); })();
 setInterval(relTimes, 30000);
 </script>
 </body>
@@ -415,7 +422,7 @@ def _event_row(e, snap):
 def render_fragment(snap):
     s, h, today = snap["status"], snap["health"], snap["today"]
     fmt, now = snap["fmt"], snap["now"]
-    out = [f'<div hidden data-running="{1 if s["running"] else 0}" data-enabled="{1 if s["checks_enabled"] else 0}"></div>',
+    out = [f'<div hidden data-running="{1 if s["running"] else 0}" data-enabled="{1 if s["checks_enabled"] else 0}" data-last="{_e(str(s["last_check"] or ""))}"></div>',
            f'<div hidden data-pills>{_pills(snap)}</div>']
     if snap.get("setup_missing"):  # first run, or something was cleared: say what is missing and where to fix it
         out.append(f'<div class="notice">Setup needed: {_e(", ".join(snap["setup_missing"]))}. <a href="/setup">Open the Settings page</a>.</div>')

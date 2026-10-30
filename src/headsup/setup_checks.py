@@ -8,6 +8,7 @@ tested by re-running a build.
 
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import httpx
@@ -71,7 +72,7 @@ def check_calendar(settings, client, now=None):
         return _result(False, "the address did not return a calendar", configured=True)
     finally:
         store.close()
-    return _result(True, "readable", configured=True)
+    return _result(True, "OK, calendar readable", configured=True)
 
 
 def _telegram_message(exc):
@@ -107,10 +108,20 @@ def not_tested(settings):
     }
 
 
+def _timed(check, *args):
+    started = time.monotonic()
+    return check(*args), int((time.monotonic() - started) * 1000)
+
+
 def run_checks(settings, client, now=None, budget_s=45.0, clock=time.monotonic):
-    """Every check on the saved settings. Reads and sends nothing but the three test requests above."""
-    return {"github": check_github(settings, client, clock() + budget_s, clock), "calendar": check_calendar(settings, client, now),
-            "telegram": check_telegram(settings, client), **not_tested(settings)}
+    """The three checks on the saved settings, side by side (so the slowest one decides the wait, not their sum), each timed in
+    milliseconds. Reads and sends nothing but the three test requests above."""
+    jobs = {"github": (check_github, settings, client, clock() + budget_s, clock), "calendar": (check_calendar, settings, client, now),
+            "telegram": (check_telegram, settings, client)}
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futures = {name: pool.submit(_timed, *job) for name, job in jobs.items()}
+        done = {name: future.result() for name, future in futures.items()}
+    return {**{name: done[name][0] for name in jobs}, "timing_ms": {name: done[name][1] for name in jobs}, **not_tested(settings)}
 
 
 def find_chats(settings, client):
@@ -127,21 +138,52 @@ def find_chats(settings, client):
     out.update(chats=chats, ignored=ignored)
     if not chats:
         out.update(status="none", message="No messages found. Open your bot in Telegram, press Start or send it any message, then try "
-                   "again. Telegram keeps messages for at most 24 hours.")
+                   "again. Telegram keeps messages for at most 24 hours, and forgets them once a button is tapped after them: if you "
+                   "have, send it \"hi\" again.")
     return out
 
 
-def send_test(settings, client):
-    """One fixed message to the saved chat."""
-    if not settings.telegram_bot_token or settings.telegram_chat_id is None:
-        return _result(False, "Save the bot token and the chat ID first.")
+def stored_chats(open_store, now=None):
+    """The private chats the running worker has seen write to the bot in the last ten minutes (it keeps their id, first name and
+    time, nothing else). Used while the worker is polling, because then it, not the finder, is the one that sees the messages."""
+    now = (now or (lambda: datetime.now(timezone.utc)))()
+    store = open_store()
     try:
-        Telegram(client, settings.telegram_bot_token, settings.telegram_chat_id, None).send(TEST_TEXT)
+        rows = store.recent_chats(now)
+    finally:
+        store.close()
+    out = {"status": "ok", "message": "", "chats": [{"id": i, "name": n, "last": t} for i, n, t in rows], "ignored": 0}
+    if not rows:
+        out.update(status="none", message="No message from the last 10 minutes. Open your bot in Telegram, send it any message (for "
+                   "example hi), then press Find my chat ID again within 10 minutes.")
+    return out
+
+
+def _not_sent(code, text):
+    return _result(False, f"NOT SENT ({code}): {text}", status=code)
+
+
+_SEND_WHY = {
+    "HTTP 400": ("http_400", "Telegram answered HTTP 400: it does not know this chat. Check the chat ID, and that you have started a chat with the bot."),
+    "HTTP 401": ("http_401", "Telegram answered HTTP 401: the bot token was rejected."),
+    "HTTP 403": ("http_403", "Telegram answered HTTP 403: the bot cannot write to this chat. Open the bot in Telegram and press Start."),
+    "HTTP 404": ("http_404", "Telegram answered HTTP 404: the bot token is not recognised."),
+    "rate_limited": ("rate_limited", "Telegram says there were too many requests. Try again in a minute."),
+    "ReadTimeout": ("timeout", "Telegram did not answer in time. The message may still arrive: look in the chat before trying again."),
+}
+
+
+def send_test(settings, client):
+    """One fixed message to the saved chat. Every outcome has its own `status` and its own text, so the page shows which path ran."""
+    if not settings.telegram_bot_token or settings.telegram_chat_id is None:
+        return _not_sent("not_configured", "Save the bot token and the chat ID first.")
+    try:
+        message_id = Telegram(client, settings.telegram_bot_token, settings.telegram_chat_id, None).send(TEST_TEXT)
     except TelegramError as exc:
-        kind = exc.kind
-        if kind == "HTTP 400":
-            return _result(False, "HTTP 400: Telegram does not know this chat. Check the chat ID, and that you have started a chat with the bot.")
-        if kind == "HTTP 403":
-            return _result(False, "HTTP 403: the bot cannot write to this chat. Open the bot in Telegram and press Start.")
-        return _result(False, _telegram_message(exc))
-    return _result(True, "Sent. Check Telegram.")
+        known = _SEND_WHY.get(exc.kind)
+        if known:
+            return _not_sent(*known)
+        if exc.kind.startswith("HTTP "):
+            return _not_sent("http_" + exc.kind[5:], f"Telegram answered {exc.kind}.")
+        return _not_sent("network", "Could not reach Telegram (network error).")
+    return _result(True, f"SENT: Telegram accepted the test message (message number {message_id}). Look in your chat with the bot.", status="sent")

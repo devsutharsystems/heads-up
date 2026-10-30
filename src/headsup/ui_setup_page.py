@@ -57,15 +57,21 @@ _SCRIPT = r"""
     return e;
   }
 
+  // A request that gets no answer for a minute is given up, so the page never waits for ever.
   async function call(method, path, body) {
     const init = method === 'GET' ? {} : { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token }, body: JSON.stringify(body || {}) };
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), 60000);
+    init.signal = stop.signal;
     try {
       const r = await fetch(path, init);
       let data = {};
       try { data = await r.json(); } catch (e) { /* an empty or non-JSON answer */ }
       return [r.status, data];
     } catch (e) {
-      return [0, { message: 'Could not reach the app. Is it still running?' }];
+      return [0, { message: stop.signal.aborted ? 'The app did not answer within a minute.' : 'Could not reach the app. Is it still running?', timedOut: stop.signal.aborted }];
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -82,6 +88,21 @@ _SCRIPT = r"""
     try { await fn(); } finally {
       busy = false;
       for (const b of document.querySelectorAll('button')) b.disabled = false;
+    }
+  }
+
+  // The three helper buttons (find chat, test message, test connection) only read or send: each one disables just itself, shows what
+  // it is doing, and leaves the rest of the page usable. Saving and choosing a chat change the settings, so those still lock everything.
+  const inFlight = {};
+  async function runOne(name, button, progress, fn) {
+    if (busy || inFlight[name]) return;
+    inFlight[name] = true;
+    if (button) button.disabled = true;
+    if (progress) say(progress, '');
+    try { await fn(); } finally {
+      delete inFlight[name];
+      const again = button ? el(button.id) : null;
+      if (again && !busy) again.disabled = false;
     }
   }
 
@@ -124,8 +145,8 @@ _SCRIPT = r"""
 
   function telegramTools() {
     return h('div', {}, h('div', { class: 'buttons' },
-      h('button', { class: 'secondary', type: 'button', id: 'find-chat', text: 'Find my chat ID', on: { click: () => busyWhile(findChat) } }),
-      h('button', { class: 'secondary', type: 'button', id: 'send-test', text: 'Send test message', on: { click: () => busyWhile(sendTest) } })),
+      h('button', { class: 'secondary', type: 'button', id: 'find-chat', text: 'Find my chat ID', on: { click: (ev) => runOne('find', ev.currentTarget, 'Looking for messages sent to your bot...', findChat) } }),
+      h('button', { class: 'secondary', type: 'button', id: 'send-test', text: 'Send test message', on: { click: (ev) => runOne('send', ev.currentTarget, 'Sending the test message...', sendTest) } })),
       h('div', { id: 'chat-area' }));
   }
 
@@ -204,28 +225,35 @@ _SCRIPT = r"""
     if (status === 200 && data.status === 'saved') say((data.message || 'Saved.') + ' Chat: ' + data.name + '. Press Send test message to check it.', 'good', !!data.unapplied);
   }
 
+  // Every outcome has its own wording: the server's own line when it sent one, else which kind of failure the page itself saw.
   async function sendTest() {
     const [status, data] = await call('POST', '/api/setup/test-message', {});
-    say(data.message || 'No answer.', data.ok ? 'good' : 'bad');
+    let text = data.message;
+    if (status === 0) text = 'NOT SENT (' + (data.timedOut ? 'no_answer' : 'no_connection') + '): ' + data.message;
+    else if (!text) text = 'NOT SENT (no_message): the app answered HTTP ' + status + ' without a message.';
+    say(text, data.ok ? 'good' : 'bad');
   }
 
   async function testConnection() {
     say('Testing the saved settings...', '');
-    el('results').replaceChildren();
+    const waiting = (name) => h('li', {}, h('span', { class: 'chip missing', text: 'Testing' }), h('span', { text: name + ': waiting for the answer...' }));
+    el('results').replaceChildren(waiting('GitHub'), waiting('Calendar'), waiting('Telegram'));
     const [status, data] = await call('POST', '/api/setup/test-connection', {});
-    if (status !== 200 || !data.ok) { say(data.message || 'The test could not run.', 'bad'); return; }
+    if (status !== 200 || !data.ok) { el('results').replaceChildren(); say(data.message || 'The test could not run.', 'bad'); return; }
     say('', '');
-    const line = (name, ok, text) => h('li', {}, h('span', { class: 'chip ' + (ok ? 'ok' : 'bad'), text: ok ? 'OK' : 'Problem' }), h('span', { text: name + ': ' + text }));
+    const ms = data.timing_ms || {};
+    const took = (key) => (typeof ms[key] === 'number' ? ' (' + (ms[key] / 1000).toFixed(1) + ' s)' : '');
+    const line = (name, ok, text, key) => h('li', {}, h('span', { class: 'chip ' + (ok ? 'ok' : 'bad'), text: ok ? 'OK' : 'Problem' }), h('span', { text: name + ': ' + text + took(key) }));
     const skipped = (name, text) => h('li', {}, h('span', { class: 'chip missing', text: 'Not tested' }), h('span', { text: name + ': ' + text }));
     el('results').replaceChildren(
-      ...data.github.map((r) => line('GitHub ' + r.name, r.ok, r.message)),
-      data.calendar.configured ? line('Calendar', data.calendar.ok, data.calendar.message) : skipped('Calendar', data.calendar.message),
-      data.telegram.configured ? line('Telegram', data.telegram.ok, data.telegram.message) : skipped('Telegram', data.telegram.message),
+      ...data.github.map((r) => line('GitHub ' + r.name, r.ok, r.message, 'github')),
+      data.calendar.configured ? line('Calendar', data.calendar.ok, data.calendar.message, 'calendar') : skipped('Calendar', data.calendar.message),
+      data.telegram.configured ? line('Telegram', data.telegram.ok, data.telegram.message, 'telegram') : skipped('Telegram', data.telegram.message),
       skipped('Haiku', data.haiku.message), skipped('Write token', data.writeToken.message));
   }
 
   el('save').addEventListener('click', () => busyWhile(save));
-  el('test').addEventListener('click', () => busyWhile(testConnection));
+  el('test').addEventListener('click', (ev) => runOne('test', ev.currentTarget, '', testConnection));
 
   (async function start() {
     const [status, data] = await call('GET', '/api/setup-form');

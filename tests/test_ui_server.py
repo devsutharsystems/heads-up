@@ -6,7 +6,7 @@ import pytest
 from headsup import config
 from headsup.policy import DAILY_LIMIT
 from headsup.ui_server import GET_JSON, POST_ROUTES, make_server
-from ui_world import EVIL_TITLE, FAKE_BOT, FAKE_BUTTON_TOKEN, FAKE_GH, FAKE_ICAL, FAKE_KEY, SECRETS, FakeRun, Live, make_runner, seed
+from ui_world import EVIL_TITLE, FAKE_BOT, FAKE_BUTTON_TOKEN, FAKE_GH, FAKE_ICAL, FAKE_KEY, NOW, SECRETS, FakeRun, Live, make_runner, seed
 
 
 @pytest.fixture
@@ -499,3 +499,31 @@ def test_header_and_rows_share_one_grid_template_and_one_padding_rule(live):
     assert 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0' in page
     assert page.count("<span>When</span><span>Source</span><span>Event</span>") == 1 and "<span>Decision</span>" in page
     assert ".ev-head { display:none; } .ev { grid-template-columns:minmax(0,1fr);" in page  # below 700px: no header, stacked cards
+
+
+# ---------------------------------------------------------------------------------------------------------- the dashboard answers a click at once
+def test_the_fragment_carries_the_last_check_time_escaped_for_the_page_to_notice_a_finished_pass(tmp_path):
+    path = tmp_path / "t.db"
+    runner = make_runner(path)
+    runner.last = {"at": NOW, "summary": None, "error": None}
+    server = Live(path, runner)
+    try:
+        html = json.loads(server.request("GET", "/fragment")[2])["html"]
+        assert f'data-last="{NOW.isoformat()}"' in html and 'data-running="0"' in html
+        runner.last = None
+        assert 'data-last=""' in json.loads(server.request("GET", "/fragment")[2])["html"]
+    finally:
+        server.close()
+
+
+def test_the_dashboard_script_polls_every_second_while_a_check_is_queued_or_running_and_keeps_saying_checking(tmp_path):
+    path = tmp_path / "t.db"
+    server = Live(path, make_runner(path))
+    try:
+        page = server.request("GET", "/")[2]
+    finally:
+        server.close()
+    assert "setTimeout(poll, running || queuedAt ? 1000 : 5000)" in page and "setInterval(refresh, 5000)" not in page
+    assert "queuedAt = Date.now()" in page and "const busy = running || queuedAt > 0;" in page
+    assert "lastSeen !== null && last !== lastSeen" in page, "a finished pass (a new last-check time) ends the waiting state"
+    assert "Date.now() - queuedAt > 20000" in page, "and it never sticks for ever"

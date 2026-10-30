@@ -74,7 +74,7 @@ def calendar_world(**kw):
 
 def test_calendar_readable():
     world = calendar_world()
-    assert check_calendar(settings(), world.client, now=lambda: NOW) == {"ok": True, "message": "readable", "configured": True}
+    assert check_calendar(settings(), world.client, now=lambda: NOW) == {"ok": True, "message": "OK, calendar readable", "configured": True}
     assert world.timeouts[-1] == netutil.TIMEOUT.as_dict()
 
 
@@ -174,7 +174,8 @@ def test_haiku_and_the_write_token_are_never_tested_and_nothing_is_sent():
 def test_run_checks_runs_every_check_once_and_sends_no_message_and_no_write():
     world = calendar_world()
     result = run_checks(settings(), world.client, now=lambda: NOW)
-    assert set(result) == {"github", "calendar", "telegram", "haiku", "writeToken"}
+    assert set(result) == {"github", "calendar", "telegram", "timing_ms", "haiku", "writeToken"}
+    assert set(result["timing_ms"]) == {"github", "calendar", "telegram"} and all(isinstance(v, int) and v >= 0 for v in result["timing_ms"].values())
     assert result["github"][0]["ok"] and result["calendar"]["ok"] and result["telegram"]["ok"]
     assert world.methods() == ["getMe"] and world.github_writes == [] and world.decider_requests == []
     assert nothing_secret(result)
@@ -278,7 +279,8 @@ def test_names_are_made_printable_and_short_and_odd_updates_are_skipped():
 # ------------------------------------------------------------------------------------------------------------------ the test message
 def test_the_test_message_is_one_fixed_text_to_the_saved_chat_and_nothing_else():
     world = World()
-    assert send_test(settings(), world.client) == {"ok": True, "message": "Sent. Check Telegram."}
+    result = send_test(settings(), world.client)
+    assert result == {"ok": True, "status": "sent", "message": "SENT: Telegram accepted the test message (message number 100). Look in your chat with the bot."}
     assert world.sent() == [{"chat_id": CHAT, "text": TEST_TEXT}]
     assert world.methods() == ["sendMessage"]
 
@@ -286,11 +288,12 @@ def test_the_test_message_is_one_fixed_text_to_the_saved_chat_and_nothing_else()
 @pytest.mark.parametrize("kw", [{"telegram_bot_token": None}, {"telegram_chat_id": None}])
 def test_the_test_message_needs_a_token_and_a_chat_id_and_sends_nothing_without_them(kw):
     world = World()
-    assert send_test(settings(**kw), world.client) == {"ok": False, "message": "Save the bot token and the chat ID first."}
+    assert send_test(settings(**kw), world.client) == {"ok": False, "status": "not_configured",
+                                                       "message": "NOT SENT (not_configured): Save the bot token and the chat ID first."}
     assert world.calls == []
 
 
-@pytest.mark.parametrize("status,needle", [(400, "does not know this chat"), (403, "press Start"), (401, "token rejected"), (500, "HTTP 500")])
+@pytest.mark.parametrize("status,needle", [(400, "does not know this chat"), (403, "press Start"), (401, "was rejected"), (500, "HTTP 500")])
 def test_test_message_failures_say_what_to_do_without_the_token(status, needle):
     world = World()
     world.telegram_status["sendMessage"] = status
@@ -313,3 +316,95 @@ def test_none_of_the_helpers_gives_telegram_a_store_so_none_can_read_or_move_the
     find_chats(settings(), world.client)
     send_test(settings(), world.client)
     assert built == [None, None, None]
+
+
+SEND_OUTCOMES = [  # what goes wrong -> the status it reports and a phrase only that path says
+    ({"telegram_status": {"sendMessage": 400}}, "http_400", "does not know this chat"),
+    ({"telegram_status": {"sendMessage": 401}}, "http_401", "bot token was rejected"),
+    ({"telegram_status": {"sendMessage": 403}}, "http_403", "press Start"),
+    ({"telegram_status": {"sendMessage": 404}}, "http_404", "not recognised"),
+    ({"telegram_status": {"sendMessage": 429}}, "rate_limited", "too many requests"),
+    ({"telegram_status": {"sendMessage": 500}}, "http_500", "answered HTTP 500."),
+    ({"telegram_raise": httpx.ReadTimeout("slow")}, "timeout", "may still arrive"),
+    ({"telegram_raise": httpx.ConnectError("down")}, "network", "Could not reach Telegram"),
+    ({"telegram_raise": httpx.ConnectTimeout("down")}, "network", "Could not reach Telegram"),
+]
+
+
+@pytest.mark.parametrize("setup,status,phrase", SEND_OUTCOMES)
+def test_every_way_the_test_message_can_fail_has_its_own_status_and_words(setup, status, phrase):
+    world = World()
+    for name, value in setup.items():
+        setattr(world, name, value)
+    result = send_test(settings(), world.client)
+    assert result["ok"] is False and result["status"] == status and phrase in result["message"]
+    assert result["message"].startswith(f"NOT SENT ({status}): "), "it says in so many words that nothing was sent"
+    assert nothing_secret(result)
+
+
+def test_the_outcomes_are_all_told_apart():
+    messages = {}
+    for setup, status, _ in SEND_OUTCOMES:
+        world = World()
+        for name, value in setup.items():
+            setattr(world, name, value)
+        messages.setdefault(status, set()).add(send_test(settings(), world.client)["message"])
+    assert len(set().union(*messages.values())) == len(messages) == 8, "eight different statuses, eight different texts"
+    ok = send_test(settings(), World().client)
+    assert ok["status"] == "sent" and ok["message"].startswith("SENT: ") and "NOT SENT" not in ok["message"]
+
+
+# ------------------------------------------------------------------------------------------------------------------ the checks side by side
+def test_the_three_checks_run_side_by_side_and_each_is_timed(monkeypatch):
+    import time as _time
+    started = []
+
+    def slow(name, result):
+        def check(*args, **kwargs):
+            started.append((name, _time.monotonic()))
+            _time.sleep(0.3)
+            return result
+        return check
+
+    monkeypatch.setattr(setup_checks, "check_github", slow("github", [{"ok": True, "message": "OK", "name": "a/b"}]))
+    monkeypatch.setattr(setup_checks, "check_calendar", slow("calendar", {"ok": True, "message": "OK, calendar readable", "configured": True}))
+    monkeypatch.setattr(setup_checks, "check_telegram", slow("telegram", {"ok": True, "message": "OK", "configured": True}))
+    began = _time.monotonic()
+    result = run_checks(settings(), World().client)
+    elapsed = _time.monotonic() - began
+    assert elapsed < 0.7, f"sequentially this would take 0.9 s; it took {elapsed:.2f} s"
+    assert max(t for _, t in started) - min(t for _, t in started) < 0.2, "all three began together"
+    assert all(250 <= ms < 700 for ms in result["timing_ms"].values())
+    assert result["github"][0]["name"] == "a/b" and result["calendar"]["ok"] and result["telegram"]["ok"]
+
+
+def test_every_ok_says_ok():
+    world = calendar_world()
+    result = run_checks(settings(), world.client, now=lambda: NOW)
+    assert result["github"][0]["message"] == "OK" and result["calendar"]["message"].startswith("OK") and result["telegram"]["message"].startswith("OK")
+
+
+# ------------------------------------------------------------------------------------------------------------------ stored chats
+def test_stored_chats_offers_what_the_worker_saw_and_asks_telegram_nothing(tmp_path):
+    from datetime import timedelta
+    from headsup.setup_checks import stored_chats
+    from headsup.store import Store
+    store = Store(tmp_path / "t.db")
+    store.note_chat(777, "Ada", NOW - timedelta(minutes=2), NOW)
+    store.close()
+    world = World()
+    found = stored_chats(lambda: Store(tmp_path / "t.db"), lambda: NOW)
+    assert found["status"] == "ok" and found["ignored"] == 0 and world.calls == []
+    assert found["chats"] == [{"id": 777, "name": "Ada", "last": NOW - timedelta(minutes=2)}]
+
+
+def test_stored_chats_says_how_to_try_again_when_nothing_is_there(tmp_path):
+    from headsup.setup_checks import stored_chats
+    from headsup.store import Store
+    found = stored_chats(lambda: Store(tmp_path / "t.db"), lambda: NOW)
+    assert found["status"] == "none" and found["chats"] == [] and "10 minutes" in found["message"] and "hi" in found["message"]
+
+
+def test_the_direct_finder_warns_that_a_button_tap_makes_telegram_forget_a_message():
+    found = find_chats(settings(), World().client)
+    assert found["status"] == "none" and "24 hours" in found["message"] and "forgets" in found["message"] and '"hi" again' in found["message"]

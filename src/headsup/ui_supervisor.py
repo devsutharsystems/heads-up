@@ -5,8 +5,8 @@ new Runner from the new Settings, carries over what should survive (paused, the 
 and tells the server to use the new Runner. Nothing is changed unless the whole sequence can succeed:
   - if a check is still running when the stop is requested, the stop is cancelled and the old worker carries on ("busy");
   - if the new Runner cannot be built, the old worker is started again ("failed").
-suspend()/resume() stop and start the worker around the chat-ID finder, so two getUpdates calls never overlap (Telegram answers
-the second one with HTTP 409).
+A restart does not start a check by itself: the new runner inherits the old one's next check time, so saving a setting never
+makes the app run a pass at an odd moment. Only a runner that was idle (Telegram not set up yet) starts with a check due at once.
 """
 
 import threading
@@ -20,7 +20,7 @@ class RestartResult:
 
 
 class Supervisor:
-    def __init__(self, make_runner, settings, *, join_timeout=30.0, grace=1.0):
+    def __init__(self, make_runner, settings, *, join_timeout=10.0, grace=1.0):
         self._make_runner = make_runner
         self.settings = settings
         self.runner = make_runner(settings)
@@ -52,11 +52,14 @@ class Supervisor:
                 self._spawn()
 
     def _halt(self):
-        """Ask the worker to stop and wait for it. True once it has stopped (or none was running). False when a check is still
-        running after `join_timeout`: the request is withdrawn and the worker carries on with what it was doing."""
+        """Ask the worker to stop and wait for it. True once it has stopped (or none was running). False at once when a check is
+        running, and also when one is still running after `join_timeout`: the request is withdrawn and the worker carries on."""
         thread = self._thread
         if thread is None or not thread.is_alive():
             return True
+        run_lock = getattr(self.runner, "run_lock", None)
+        if run_lock is not None and run_lock.locked():
+            return False  # no waiting for a pass that can take minutes: the caller says "busy" now
         self._stop.set()
         thread.join(self.join_timeout)
         if not thread.is_alive():
@@ -73,15 +76,6 @@ class Supervisor:
                 self._stop.set()
                 self._thread.join(timeout)
 
-    # ------------------------------------------------------------------------------------------ pausing for the chat finder
-    def suspend(self):
-        """Stop the worker (so nothing else polls Telegram). True if it stopped; False if a check is still running."""
-        with self._lock:
-            return self._halt()
-
-    def resume(self):
-        self.start()
-
     # ------------------------------------------------------------------------------------------ new settings
     def restart(self, settings):
         with self._lock:
@@ -95,6 +89,8 @@ class Supervisor:
                 return RestartResult("failed", type(exc).__name__)
             new.paused = old.paused
             new.last = old.last
+            if old.telegram_ready:
+                new.next_check = old.next_check  # a save is not a reason to run a pass now
             if old.check_requested.is_set():  # a "Check now" that arrived while we swapped
                 new.check_requested.set()
             self.runner, self.settings = new, settings

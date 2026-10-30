@@ -84,8 +84,10 @@ class Telegram:
         return self._call("sendMessage", payload)["message_id"]
 
     def get_updates(self, timeout=30):
-        """Long-poll for button taps. The caller confirms each handled update with confirm()."""
-        payload = {"timeout": timeout, "allowed_updates": ["callback_query"]}
+        """Long-poll for button taps (and for messages, whose sender the setup page may offer: see chat_from_update). The caller
+        confirms each handled update with confirm(); an offset forgets every earlier update of any kind, so the caller must look at
+        a message before it confirms a later tap."""
+        payload = {"timeout": timeout, "allowed_updates": ["callback_query", "message"]}
         offset = self.store.get_kv(OFFSET_KEY)
         if offset is not None:
             payload["offset"] = int(offset)
@@ -127,6 +129,23 @@ class Telegram:
     def remove_keyboard(self, message_id):
         return self._call("editMessageReplyMarkup", {"chat_id": self.chat_id, "message_id": message_id,
                                                       "reply_markup": {"inline_keyboard": []}})
+
+
+def chat_from_update(update):
+    """(chat id, first name, sent_at) for a `message` update from a PRIVATE chat, else None. Nothing else of the message is read:
+    not its text, not a username, not a surname."""
+    message = update.get("message") if isinstance(update, dict) else None
+    chat = message.get("chat") if isinstance(message, dict) else None
+    if not isinstance(chat, dict) or chat.get("type") != "private":
+        return None
+    chat_id = chat.get("id")
+    if isinstance(chat_id, bool) or not isinstance(chat_id, int) or chat_id <= 0:
+        return None
+    first = chat.get("first_name")
+    name = re.sub(r"[\x00-\x1f\x7f]", "", first).strip()[:60] if isinstance(first, str) else ""
+    date = message.get("date")
+    sent = datetime.fromtimestamp(date, tz=timezone.utc) if isinstance(date, int) and not isinstance(date, bool) and date > 0 else None
+    return chat_id, name or "(no name)", sent
 
 
 def _display_name(chat):

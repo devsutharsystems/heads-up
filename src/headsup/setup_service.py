@@ -4,7 +4,9 @@ Telegram happens here. Every method takes the parsed JSON body and returns (HTTP
 Nothing returned from here contains a key, the chat ID or the calendar address: the form view says "set" or "missing", the chat
 finder returns an index and a name (the ids stay in `_pending` on the server), and messages are fixed text plus a setting's label.
 Saving, clearing, applying and choosing a chat run under one lock from the file write to the worker restart, so two requests can
-never interleave. The finder holds the same lock and stops the worker while it asks Telegram, so two getUpdates calls never overlap.
+never interleave. While the worker polls Telegram it is the one that sees messages to the bot (and keeps who wrote for ten minutes), so the chat
+finder reads that and asks Telegram nothing. Only when the worker is idle (no chat ID yet) does the finder ask Telegram itself,
+without confirming anything, and then nobody else is polling. Neither case stops the worker or takes the settings lock.
 """
 
 import threading
@@ -25,14 +27,16 @@ def _only(body, allowed):
 
 
 class SetupService:
-    def __init__(self, supervisor, client, *, env_path=config.DEFAULT_ENV, monotonic=time.monotonic):
+    def __init__(self, supervisor, client, *, env_path=config.DEFAULT_ENV, monotonic=time.monotonic, open_store=None, now=None):
         self.supervisor, self.client, self.env_path = supervisor, client, env_path
         self._monotonic = monotonic
+        self._open_store, self._now = open_store, now
         self._lock = threading.Lock()  # save, clear, apply, choose a chat and the chat finder, end to end
         self._test_lock = threading.Lock()  # one connection test at a time
         self._unapplied = False  # settings are saved but the running app does not use them yet
         self._pending = None  # {"ids", "names", "at"}: the chats offered to the user (the ids never leave the server)
         self._last_test_message = None
+        self._send_lock = threading.Lock()  # one test message at a time
 
     # ------------------------------------------------------------------------------------------ for the server
     def required_missing(self):
@@ -133,17 +137,15 @@ class SetupService:
         settings = self.supervisor.settings
         if not settings.telegram_bot_token:
             return 200, {"ok": False, "status": "no_token", "message": "Save the bot token first."}
-        with self._lock:
-            if not self.supervisor.suspend():
-                return 409, {"ok": False, "status": "busy", "message": "A check is running. Try again in a minute."}
-            try:
-                found = setup_checks.find_chats(settings, self.client)
-            finally:
-                self.supervisor.resume()
-            if found["status"] != "ok":
-                return 200, {"ok": False, "status": found["status"], "message": found["message"]}
-            chats = found["chats"]
-            self._pending = {"ids": [c["id"] for c in chats], "names": [c["name"] for c in chats], "at": self._monotonic()}
+        runner = self.supervisor.runner
+        if self._open_store is not None and runner.telegram_ready:
+            found = setup_checks.stored_chats(self._open_store, self._now)  # the worker is polling: it keeps who wrote
+        else:
+            found = setup_checks.find_chats(settings, self.client)  # nobody else polls: ask Telegram, confirm nothing
+        if found["status"] != "ok":
+            return 200, {"ok": False, "status": found["status"], "message": found["message"]}
+        chats = found["chats"]
+        self._pending = {"ids": [c["id"] for c in chats], "names": [c["name"] for c in chats], "at": self._monotonic()}  # one assignment: no lock
         note = f" {found['ignored']} group chat(s) were ignored: buttons only work in a private chat." if found["ignored"] else ""
         single = len(chats) == 1
         return 200, {"ok": True, "status": "choose", "single": single, "ignored": found["ignored"],
@@ -169,16 +171,27 @@ class SetupService:
                                         extra={"status": "saved", "name": pending["names"][index]})
 
     def send_test(self, body):
+        """Every outcome answers with its own `status` and a text that starts "SENT" or "NOT SENT (<status>)", so the page shows
+        which path ran. The 5 s gap counts from the last message that really went out."""
         if not _only(body, ()):
             return _BAD
-        blocked = self._need_applied()
-        if blocked:
-            return blocked
-        now = self._monotonic()
-        if self._last_test_message is not None and now - self._last_test_message < TEST_GAP_SECONDS:
-            return 429, {"ok": False, "message": "Wait a few seconds before sending another test message."}
-        self._last_test_message = now
-        return 200, setup_checks.send_test(self.supervisor.settings, self.client)
+        if self._unapplied:
+            return 409, {"ok": False, "status": "unapplied", "unapplied": True,
+                         "message": "NOT SENT (unapplied): the saved settings are not active yet. Press Apply first."}
+        if not self._send_lock.acquire(blocking=False):
+            return 409, {"ok": False, "status": "in_progress", "message": "NOT SENT (in_progress): another test message is still being sent."}
+        try:
+            now = self._monotonic()
+            if self._last_test_message is not None and now - self._last_test_message < TEST_GAP_SECONDS:
+                wait = max(1, round(TEST_GAP_SECONDS - (now - self._last_test_message) + 0.49))
+                return 429, {"ok": False, "status": "too_soon",
+                             "message": f"NOT SENT (too_soon): a test message went out a moment ago. Wait {wait} seconds and try again."}
+            result = setup_checks.send_test(self.supervisor.settings, self.client)
+            if result["ok"]:
+                self._last_test_message = self._monotonic()
+            return 200, result
+        finally:
+            self._send_lock.release()
 
     # ------------------------------------------------------------------------------------------ the connection test
     def test_connection(self, body):

@@ -42,11 +42,11 @@ def test_telegram_sends_message_with_buttons_and_long_polls(tmp_path):
     assert [b["text"] for b in buttons] == ["Snooze 1h", "Remind in 2h"]
     assert all(len(b["callback_data"].encode()) <= 64 for b in buttons)
 
-    # long polling: only callback queries, the stored offset, an HTTP timeout longer than the poll timeout
+    # long polling: button taps and messages (a message is only noted, see chat_from_update), the stored offset, an HTTP timeout longer than the poll timeout
     world.tap(FAKE_TOKEN, update_id=7)
     updates = tg.get_updates(timeout=25)
     method, poll = world.calls[-1]
-    assert method == "getUpdates" and poll["timeout"] == 25 and poll["allowed_updates"] == ["callback_query"] and "offset" not in poll
+    assert method == "getUpdates" and poll["timeout"] == 25 and poll["allowed_updates"] == ["callback_query", "message"] and "offset" not in poll
     assert [u["update_id"] for u in updates] == [7]
     tg.confirm(7)
     assert store.get_kv("telegram_offset") == "8"  # offset lives in SQLite
@@ -140,3 +140,40 @@ def test_rate_limited_send_raises_without_retrying(tmp_path):
 def test_httpx_request_logging_is_kept_off_so_urls_never_reach_a_log(caplog):
     import headsup  # noqa: F401
     assert logging.getLogger("httpx").level >= logging.WARNING and logging.getLogger("httpcore").level >= logging.WARNING
+
+
+# ---------------------------------------------------------------------------------------------------- who wrote (chat_from_update)
+from headsup.telegram import chat_from_update
+
+
+def private_message(chat_id=5, **chat):
+    return {"update_id": 1, "message": {"message_id": 1, "date": 1_793_620_000, "text": "private words",
+                                        "chat": {"id": chat_id, "type": "private", "first_name": "Ada", **chat}}}
+
+
+def test_chat_from_update_reads_only_the_id_the_first_name_and_the_time():
+    chat_id, name, sent = chat_from_update(private_message(last_name="Lovelace", username="ada_l"))
+    assert (chat_id, name) == (5, "Ada") and sent.isoformat() == "2026-11-02T11:46:40+00:00"
+
+
+@pytest.mark.parametrize("update", [
+    {"update_id": 1, "message": {"chat": {"id": -100123, "type": "supergroup", "title": "Team"}}},
+    {"update_id": 1, "message": {"chat": {"id": 5, "type": "group"}}},
+    {"update_id": 1, "message": {"chat": {"id": 5, "type": "channel"}}},
+    {"update_id": 1, "message": {"chat": {"id": -5, "type": "private"}}},
+    {"update_id": 1, "message": {"chat": {"id": 0, "type": "private"}}},
+    {"update_id": 1, "message": {"chat": {"id": True, "type": "private"}}},
+    {"update_id": 1, "message": {"chat": {"id": "5", "type": "private"}}},
+    {"update_id": 1, "message": {"chat": "nope"}}, {"update_id": 1, "message": "nope"}, {"update_id": 1, "callback_query": {}},
+    {"update_id": 1, "edited_message": {"chat": {"id": 5, "type": "private"}}}, "not a dict", None])
+def test_chat_from_update_ignores_everything_but_a_private_message(update):
+    assert chat_from_update(update) is None
+
+
+def test_chat_from_update_cleans_the_name_and_survives_missing_parts():
+    assert chat_from_update(private_message(first_name="A\x00d\nx"))[1] == "Adx"
+    assert chat_from_update(private_message(first_name="n" * 90))[1] == "n" * 60
+    assert chat_from_update(private_message(first_name=7))[1] == "(no name)"
+    no_date = private_message()
+    del no_date["message"]["date"]
+    assert chat_from_update(no_date)[2] is None
