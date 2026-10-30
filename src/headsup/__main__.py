@@ -15,13 +15,15 @@ import signal
 import sys
 import threading
 import time
+import webbrowser
 from datetime import datetime, timezone
 
 import httpx
 
 from headsup import pipeline
 from headsup.actions import ActionHandler, DryRunWriter, GitHubWriter
-from headsup.config import CHOSEN_FORMAT, CHOSEN_NOTE, CHOSEN_THRESHOLD, load_settings, setting_status
+from headsup.config import CHOSEN_FORMAT, CHOSEN_NOTE, CHOSEN_THRESHOLD, DEFAULT_ENV, load_settings, setting_status, setup_needed
+from headsup.setup_service import SetupService
 from headsup.costlog import CostLog
 from headsup.decider import Decider
 from headsup.haiku import build_client
@@ -33,6 +35,7 @@ from headsup.store import Store
 from headsup.telegram import Telegram
 from headsup.ui_runner import Redactor, Runner
 from headsup.ui_server import HOST, PORT, Context, make_server
+from headsup.ui_supervisor import Supervisor
 from headsup.writer import Writer
 
 
@@ -77,7 +80,7 @@ def build_app(settings, *, client, anthropic_client, now, dry_run, out, store, s
         policy=Policy(store, settings.decider_threshold, now=now, note=threshold_note(settings)),
         writer=Writer(anthropic_client, CostLog(store, now=now), dry_run=dry_run), sources=sources,
         unconfigured=unconfigured, key_missing=not settings.anthropic_api_key,
-        write_repos=settings.github_write_repos, decider_host=settings.decider_host, dry_run=dry_run,
+        write_repos=settings.github_write_repos, decider_host=settings.decider_host, dry_run=dry_run, baseline=True,
         now=now, out=out, sleep=sleep, monotonic=monotonic)
     if not dry_run:
         app.telegram = Telegram(client, settings.telegram_bot_token, settings.telegram_chat_id, store, sleep=sleep)
@@ -86,17 +89,8 @@ def build_app(settings, *, client, anthropic_client, now, dry_run, out, store, s
     return app
 
 
-def run_ui(settings, *, out, port=PORT, client=None, db_path=None, now=None, install_signals=True):
-    """The dashboard: HTTP server (main thread), one worker thread (checks and taps), and the Ollama child if needed."""
-    now = now or (lambda: datetime.now(timezone.utc))
-    if install_signals:  # a real run: show each line at once, also when the output goes to a file
-        try:
-            sys.stdout.reconfigure(line_buffering=True)
-        except AttributeError:
-            pass
-    own_client = client is None
-    client = client or httpx.Client()
-    open_store = (lambda: Store(db_path)) if db_path else Store
+def build_runner(settings, *, client, open_store, now):
+    """A Runner whose checks and tap listener all use exactly these Settings. The supervisor calls this again after a settings save."""
     telegram_ready = settings.telegram_bot_token is not None and settings.telegram_chat_id is not None
 
     def make_app(line_out):
@@ -112,10 +106,35 @@ def run_ui(settings, *, out, port=PORT, client=None, db_path=None, now=None, ins
 
     secrets_known = (settings.anthropic_api_key, settings.github_token, settings.github_actions_write_token,
                      settings.telegram_bot_token, settings.ical_url)
-    runner = Runner(make_app=make_app, make_preview_app=make_preview_app, telegram_ready=telegram_ready, open_store=open_store,
-                    now=now, redact=Redactor(secrets_known))
+    return Runner(make_app=make_app, make_preview_app=make_preview_app, telegram_ready=telegram_ready, open_store=open_store,
+                  now=now, redact=Redactor(secrets_known))
+
+
+def open_in_browser(url):
+    """Open the page in the default browser. A failure is not an error: the address is printed anyway."""
+    try:
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001 - no browser, no desktop: nothing to do
+        pass
+
+
+def run_ui(settings, *, out, port=PORT, client=None, db_path=None, now=None, install_signals=True, env_path=None, open_browser=True):
+    """The dashboard: HTTP server (main thread), one worker thread (checks and taps), and the Ollama child if needed."""
+    now = now or (lambda: datetime.now(timezone.utc))
+    if install_signals:  # a real run: show each line at once, also when the output goes to a file
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except AttributeError:
+            pass
+    own_client = client is None
+    client = client or httpx.Client()
+    open_store = (lambda: Store(db_path)) if db_path else Store
+    supervisor = Supervisor(lambda s: build_runner(s, client=client, open_store=open_store, now=now), settings)
     child = OllamaChild(client, settings.decider_host)
-    ctx = Context(runner=runner, open_store=open_store, setup_status=setting_status, health=child.health, now=now)
+    setup_service = SetupService(supervisor, client, open_store=open_store, now=now, **({} if env_path is None else {"env_path": env_path}))
+    ctx = Context(runner=supervisor.runner, open_store=open_store, setup_status=setting_status, health=child.health, now=now,
+                  setup_service=setup_service)
+    supervisor.on_swap = lambda runner: setattr(ctx, "runner", runner)  # handlers read ctx.runner on every request
     try:
         server = make_server(HOST, port, ctx)
     except OSError:
@@ -123,24 +142,28 @@ def run_ui(settings, *, out, port=PORT, client=None, db_path=None, now=None, ins
         if own_client:
             client.close()
         return 2
-    stop = threading.Event()
     atexit.register(child.stop)
     if install_signals:
         def _term(*_):
             raise KeyboardInterrupt
         signal.signal(signal.SIGTERM, _term)
     out(f"Ollama: {child.ensure_running()}")
-    worker = threading.Thread(target=runner.run_forever, args=(stop,), daemon=True)
-    worker.start()
-    out(f"Heads-Up dashboard: http://{HOST}:{server.server_address[1]}/  (Ctrl-C to stop)")
+    supervisor.start()
+    base = f"http://{HOST}:{server.server_address[1]}/"
+    out(f"Heads-Up dashboard: {base}  (Ctrl-C to stop)")
+    if open_browser:  # the first time, when something required is still missing, the setup page instead of an empty dashboard
+        needs_setup = setup_needed(env_path or DEFAULT_ENV)
+        out("First run: opening the setup page in your browser." if needs_setup else "Opening the dashboard in your browser.")
+        opener = threading.Timer(0.5, open_in_browser, args=(base + ("setup" if needs_setup else ""),))
+        opener.daemon = True
+        opener.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         out("stopping")
     finally:
-        stop.set()
         server.server_close()
-        worker.join(timeout=15)
+        supervisor.shutdown(15)
         child.stop()
         if own_client:
             client.close()

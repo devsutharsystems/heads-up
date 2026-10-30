@@ -6,7 +6,7 @@ import pytest
 from headsup import config
 from headsup.policy import DAILY_LIMIT
 from headsup.ui_server import GET_JSON, POST_ROUTES, make_server
-from ui_world import EVIL_TITLE, FAKE_BOT, FAKE_BUTTON_TOKEN, FAKE_GH, FAKE_ICAL, FAKE_KEY, SECRETS, FakeRun, Live, make_runner, seed
+from ui_world import EVIL_TITLE, FAKE_BOT, FAKE_BUTTON_TOKEN, FAKE_GH, FAKE_ICAL, FAKE_KEY, NOW, SECRETS, FakeRun, Live, make_runner, seed
 
 
 @pytest.fixture
@@ -191,10 +191,14 @@ def test_checks_are_off_without_telegram_but_preview_works(tmp_path):
 def test_no_route_reaches_the_decider_threshold_limit_or_a_github_action():
     assert POST_ROUTES == ("check", "pause", "resume", "interval", "preview")
     assert GET_JSON == ("status", "setup", "today", "events", "alerts")
+    import headsup.setup_service as service
     import headsup.ui_page as page
     import headsup.ui_runner as runner
     import headsup.ui_server as server
-    for module in (page, runner, server):
+    import headsup.ui_setup_page as setup_page
+    from headsup.ui_server import SETUP_ROUTES
+    assert SETUP_ROUTES == ("save", "clear", "apply", "find-chat", "use-chat", "test-message", "test-connection")  # a separate group: POST_ROUTES is unchanged
+    for module in (page, runner, server, setup_page, service):  # the setup page and its service are out of reach of the judge and of Re-run CI too
         text = open(module.__file__).read()
         assert "ActionHandler" not in text and "GitHubWriter" not in text and "rerun" not in text.lower()
         assert "decider_threshold" not in text and "decider_format" not in text and "under_daily_limit" not in text
@@ -495,3 +499,31 @@ def test_header_and_rows_share_one_grid_template_and_one_padding_rule(live):
     assert 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0' in page
     assert page.count("<span>When</span><span>Source</span><span>Event</span>") == 1 and "<span>Decision</span>" in page
     assert ".ev-head { display:none; } .ev { grid-template-columns:minmax(0,1fr);" in page  # below 700px: no header, stacked cards
+
+
+# ---------------------------------------------------------------------------------------------------------- the dashboard answers a click at once
+def test_the_fragment_carries_the_last_check_time_escaped_for_the_page_to_notice_a_finished_pass(tmp_path):
+    path = tmp_path / "t.db"
+    runner = make_runner(path)
+    runner.last = {"at": NOW, "summary": None, "error": None}
+    server = Live(path, runner)
+    try:
+        html = json.loads(server.request("GET", "/fragment")[2])["html"]
+        assert f'data-last="{NOW.isoformat()}"' in html and 'data-running="0"' in html
+        runner.last = None
+        assert 'data-last=""' in json.loads(server.request("GET", "/fragment")[2])["html"]
+    finally:
+        server.close()
+
+
+def test_the_dashboard_script_polls_every_second_while_a_check_is_queued_or_running_and_keeps_saying_checking(tmp_path):
+    path = tmp_path / "t.db"
+    server = Live(path, make_runner(path))
+    try:
+        page = server.request("GET", "/")[2]
+    finally:
+        server.close()
+    assert "setTimeout(poll, running || queuedAt ? 1000 : 5000)" in page and "setInterval(refresh, 5000)" not in page
+    assert "queuedAt = Date.now()" in page and "const busy = running || queuedAt > 0;" in page
+    assert "lastSeen !== null && last !== lastSeen" in page, "a finished pass (a new last-check time) ends the waiting state"
+    assert "Date.now() - queuedAt > 20000" in page, "and it never sticks for ever"

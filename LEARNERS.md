@@ -82,12 +82,13 @@ The evaluation in this repo uses synthetic events labelled by one person (Dev). 
 
 ### Optional extension: label 30 to 50 of your own real events
 
-Run Heads-Up for a few days on your own repos and calendar (`--once`), so that `data/headsup.db` fills up. Export 30 to 50 events with their Decider probability. This snippet writes `my_real_labels.csv` with an empty `label` column:
+Run Heads-Up for a few days on your own repos and calendar (`--once`), so that `data/headsup.db` fills up. The very first run after setup only records what is already there and logs it without scoring it (reason "first run", no probability), so let some days of new events arrive and export from those. Export 30 to 50 events with their Decider probability. This snippet writes `my_real_labels.csv` with an empty `label` column:
 
 ```python
 import csv, json, sqlite3
 db = sqlite3.connect("file:data/headsup.db?mode=ro", uri=True)
-rows = db.execute("SELECT event_id, event_json FROM seen_events ORDER BY first_seen_at DESC LIMIT 50").fetchall()
+rows = db.execute("SELECT event_id, event_json FROM seen_events WHERE event_id IN (SELECT event_id FROM decisions WHERE probability IS NOT NULL) "
+                  "ORDER BY first_seen_at DESC LIMIT 50").fetchall()  # scored events only: the first run's are not scored
 prob = dict(db.execute("SELECT event_id, probability FROM decisions"))
 with open("my_real_labels.csv", "w", newline="") as f:
     out = csv.writer(f)

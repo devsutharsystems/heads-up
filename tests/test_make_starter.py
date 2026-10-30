@@ -40,6 +40,12 @@ GUIDING = {
 }
 # Other tests that fail on the starter only because they run a whole pass through a blank part.
 DOWNSTREAM = {
+    # a button tap is handled by the learner part, so the test that sends one after a message cannot pass on the starter copy
+    "test_seen_chats::test_a_button_tap_after_a_message_no_longer_makes_the_message_disappear",
+    # the first-run tests need the real interrupt decision to see an alert, so they fail on the starter copy too
+    "test_first_run::test_events_that_appear_after_the_first_run_may_interrupt",
+    "test_first_run::test_a_source_that_held_nothing_on_the_first_run_is_still_done_so_its_later_events_alert",
+    "test_first_run::test_an_install_that_already_has_events_is_not_treated_as_a_first_run",
     "test_ci_collapse::test_morning_batch_gives_one_interrupt_for_the_branch_and_still_sends_the_sandbox_failure",
     "test_ci_collapse::test_a_failure_with_an_earlier_unrecovered_alert_is_logged_only",
     "test_ci_collapse::test_after_a_recovery_a_new_failure_alerts_again",
@@ -140,7 +146,7 @@ def test_blanking_the_parts_on_a_copy_fails_exactly_the_expected_tests(tmp_path)
         failed.add(test_id)
         assert "LEARNER PART" in (problem.get("message", "") + (problem.text or "")), test_id
     assert failed == GUIDING | DOWNSTREAM
-    assert len(GUIDING) == 16 and len(DOWNSTREAM) == 23 and passed > 200
+    assert len(GUIDING) == 16 and len(DOWNSTREAM) == 27 and passed > 200
 
 
 # ---------------------------------------------------------------- the script itself

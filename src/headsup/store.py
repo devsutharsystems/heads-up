@@ -6,7 +6,7 @@ All SQL is parameterised. Datetimes are stored as ISO-8601 UTC strings.
 import json
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from headsup.schema import Decision, Event
@@ -46,7 +46,11 @@ CREATE TABLE IF NOT EXISTS reminders (event_hash TEXT PRIMARY KEY, due_at TEXT N
 CREATE TABLE IF NOT EXISTS tap_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, token TEXT, chat_id INTEGER, sender_id INTEGER,
     event_id TEXT, action TEXT, outcome TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS seen_chats (chat_id INTEGER PRIMARY KEY, first_name TEXT NOT NULL, last_seen TEXT NOT NULL);
 """
+
+
+CHAT_KEEP = timedelta(minutes=10)  # how long a sender stays in seen_chats
 
 
 def _iso(dt):
@@ -112,6 +116,10 @@ class Store:
                                 "WHERE s.kind = ?", (kind,)).fetchall()
         return [self._event_from_json(r[0]) for r in rows]
 
+    def has_events_from(self, source) -> bool:
+        """True if any event of this Event.source ("github", "calendar") was ever stored."""
+        return self._db.execute("SELECT 1 FROM seen_events WHERE source = ? LIMIT 1", (source,)).fetchone() is not None
+
     def seen_count(self) -> int:
         return self._db.execute("SELECT COUNT(*) FROM seen_events").fetchone()[0]
 
@@ -132,6 +140,27 @@ class Store:
         """Number of stored 'interrupt' decisions with start <= decided_at < end (aware datetimes)."""
         rows = self._db.execute("SELECT decided_at FROM decisions WHERE verdict = 'interrupt'").fetchall()
         return sum(1 for (t,) in rows if start <= datetime.fromisoformat(t) < end)
+
+    # ------------------------------------------------- who messaged the bot lately (for the setup page's "Find my chat ID")
+    def note_chat(self, chat_id, first_name, seen_at, now, keep=CHAT_KEEP):
+        """Remember a private chat: its id, a first name and when it last wrote. Nothing else, and never the text. Rows older than
+        `keep` are dropped first, and a message that is already that old is not stored at all."""
+        self.prune_chats(now, keep)
+        if now - seen_at > keep:
+            return
+        self._db.execute("INSERT INTO seen_chats VALUES (?,?,?) ON CONFLICT(chat_id) DO UPDATE SET first_name = excluded.first_name, "
+                         "last_seen = MAX(last_seen, excluded.last_seen)", (chat_id, first_name, _iso(seen_at)))
+        self._db.commit()
+
+    def prune_chats(self, now, keep=CHAT_KEEP):
+        self._db.execute("DELETE FROM seen_chats WHERE last_seen < ?", (_iso(now - keep),))
+        self._db.commit()
+
+    def recent_chats(self, now, keep=CHAT_KEEP):
+        """[(chat_id, first_name, last_seen)] newest first, after dropping what is older than `keep`."""
+        self.prune_chats(now, keep)
+        return [(i, n, datetime.fromisoformat(t)) for i, n, t in
+                self._db.execute("SELECT chat_id, first_name, last_seen FROM seen_chats ORDER BY last_seen DESC, chat_id")]
 
     # ------------------------------------------------------------------- kv
     def get_kv(self, key):

@@ -27,6 +27,21 @@ def ollama_start_command(host):
             "OLLAMA_KEEP_ALIVE=60s /opt/homebrew/bin/ollama serve")
 
 
+# The first run after setup: whatever a source already holds is recorded and logged only, so a new install does not open with a
+# burst of alerts about the past. Tracked per source (kv "baseline_<name>") so a source that failed on its first run is not
+# marked done, and never for an install that already has events from that source.
+FIRST_RUN_REASON = "first run: already there when Heads-Up was set up, logged only"
+SOURCE_EVENTS = {"github": "github", "ical": "calendar"}  # pipeline source name -> Event.source
+
+
+def baseline_key(name):
+    return f"baseline_{name}"
+
+
+def baseline_pending(store, name):
+    return store.get_kv(baseline_key(name)) is None and not store.has_events_from(SOURCE_EVENTS.get(name, name))
+
+
 @dataclass
 class App:
     store: object
@@ -42,6 +57,7 @@ class App:
     write_repos: tuple = ()
     decider_host: str = "127.0.0.1:11434"
     dry_run: bool = False
+    baseline: bool = False  # True for real runs (build_app): the first pass of a source only records what is already there
     now: object = lambda: datetime.now(timezone.utc)
     out: object = print
     sleep: object = time.sleep
@@ -144,11 +160,12 @@ def run_once(app):
         app.actions.sweep_expired()
         summary["sent"] += send_due_reminders(app) + retry_pending(app)
 
-    events = []
+    events, polled, baseline_hashes = [], [], set()
     for name, why in app.unconfigured:
         app.out(f"{name}: not configured ({why})")
     for name, source in app.sources:  # one line per source, so a 0 is never ambiguous
         seen_warnings = len(getattr(source, "warnings", []))
+        first_pass = app.baseline and baseline_pending(app.store, name)  # decided BEFORE polling stores anything
         try:
             found = source.poll()
         except Exception as exc:  # noqa: BLE001 - one broken source must not stop the other
@@ -156,14 +173,25 @@ def run_once(app):
             app.out(f"{name}: error {detail}")
             continue
         events += found
+        polled.append(name)
+        if first_pass:
+            baseline_hashes.update(e.content_hash for e in found)
         warnings = getattr(source, "warnings", [])[seen_warnings:]
         app.out(f"{name}: {len(found)} events" + (f" (warnings: {'; '.join(warnings)})" if warnings else ""))
     summary["collected"] = len(events)
     batch = fresh(sorted(events, key=lambda e: e.occurred_at), app.store)
+    if app.baseline:
+        for name in polled:  # a source that answered is baselined, even if it held nothing: later events are new
+            if app.store.get_kv(baseline_key(name)) is None:
+                app.store.set_kv(baseline_key(name), app.now().isoformat())
+        if baseline_hashes:
+            app.out(f"first run: {len(baseline_hashes)} existing event(s) were recorded and logged only; from now on new events can alert")
     collapsed = collapse_reasons(batch, app.store)  # repeated or superseded CI failures: logged only, no Decider call
     for event in batch:
         summary["new"] += 1
-        if event.content_hash in collapsed:
+        if event.content_hash in baseline_hashes:
+            decision = app.policy.log_only(event, FIRST_RUN_REASON)  # no Decider call, no alert, nothing to send
+        elif event.content_hash in collapsed:
             decision = app.policy.log_only(event, collapsed[event.content_hash])
         else:
             probability = app.decider.score(event) if up else None

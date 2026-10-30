@@ -126,3 +126,44 @@ def test_the_run_stops_when_the_stop_event_is_set(tmp_path):
 def test_redactor_replaces_secrets_of_eight_or_more_characters_only():
     red = Redactor(["short", FAKE_BOT, None, ""])
     assert red(f"x {FAKE_BOT} y short") == "x [redacted] y short"
+
+
+# ---------------------------------------------------------------------------------------------------------- "Check now" starts quickly
+def test_a_requested_check_starts_within_one_listen_slice_not_five_seconds():
+    """The worker only notices a request between listen slices; a slice is 2 s, so the click is never ignored for long.
+    Counted in slices, not seconds, so a slow or loaded machine cannot fail it: the click is made from inside the first slice, the
+    slice in progress may finish, and no further slice may begin before the check starts. The wall clock only guards against a hang."""
+    import threading
+    import time
+    from headsup import ui_runner
+    from ui_world import make_runner
+    import tempfile
+    from pathlib import Path
+
+    started = threading.Event()
+    slice_seconds, answers = [], []
+
+    def listen(app, minutes):
+        slice_seconds.append(round(minutes * 60, 3))
+        if len(slice_seconds) == 1:
+            answers.append(runner.request_check())  # the click arrives while the worker is inside a slice
+        time.sleep(minutes * 60)  # a real long poll that finds nothing holds for the whole slice
+        return 0
+
+    def run_once(app):
+        started.set()
+        return {}
+
+    with tempfile.TemporaryDirectory() as folder:
+        runner = make_runner(Path(folder) / "t.db", run_once=run_once, listen=listen, clock=lambda: __import__("datetime").datetime(2026, 11, 2, 12, 0, tzinfo=__import__("datetime").timezone.utc))
+        runner.next_check = runner._now() + __import__("datetime").timedelta(hours=1)  # nothing scheduled: only the click can start a check
+        stop = threading.Event()
+        worker = threading.Thread(target=runner.run_forever, args=(stop,), daemon=True)
+        worker.start()
+        assert started.wait(30), "the check ran"
+        stop.set()
+        worker.join(30)
+    assert answers == ["queued"]
+    assert set(slice_seconds) == {2.0}
+    assert len(slice_seconds) == 1, "the click waited for more than the slice in progress (it used to wait up to 5.5 s)"
+    assert ui_runner.LISTEN_SLICE_MIN * 60 == 2.0

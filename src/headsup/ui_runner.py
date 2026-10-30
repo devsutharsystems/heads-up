@@ -14,7 +14,7 @@ from headsup.telegram import WebhookConflict
 
 DEFAULT_INTERVAL = 15
 MIN_INTERVAL, MAX_INTERVAL = 1, 1440
-LISTEN_SLICE_MIN = 5 / 60  # a 5 s long-poll slice
+LISTEN_SLICE_MIN = 2 / 60  # a 2 s long-poll slice: a requested check, a stop and a settings change wait at most this long
 INTERVAL_KEY = "ui_interval_minutes"
 
 
