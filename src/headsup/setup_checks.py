@@ -166,7 +166,7 @@ def _not_sent(code, text):
 _SEND_WHY = {
     "HTTP 400": ("http_400", "Telegram answered HTTP 400: it does not know this chat. Check the chat ID, and that you have started a chat with the bot."),
     "HTTP 401": ("http_401", "Telegram answered HTTP 401: the bot token was rejected."),
-    "HTTP 403": ("http_403", "Telegram answered HTTP 403: the bot cannot write to this chat. Open the bot in Telegram and press Start."),
+    "HTTP 403": ("http_403", "Telegram answered HTTP 403: the bot cannot write to this chat. Open the bot in Telegram and press Start. Also check the chat ID is yours, not your bot's own ID (the digits before the colon in the bot token): use Find my chat ID."),
     "HTTP 404": ("http_404", "Telegram answered HTTP 404: the bot token is not recognised."),
     "rate_limited": ("rate_limited", "Telegram says there were too many requests. Try again in a minute."),
     "ReadTimeout": ("timeout", "Telegram did not answer in time. The message may still arrive: look in the chat before trying again."),

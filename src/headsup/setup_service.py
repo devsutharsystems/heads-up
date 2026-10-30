@@ -17,6 +17,7 @@ from headsup import config, setup_checks
 PENDING_SECONDS = 600  # how long a list of chats offered to the user stays valid
 TEST_GAP_SECONDS = 5.0  # at most one test message per this many seconds
 
+BOT_OWN_ID_MESSAGE = "That is your bot's own ID, not your chat. Send your bot a message and use Find my chat ID."
 _BAD = (400, {"ok": False, "error": "bad_request", "message": "That request was not understood."})
 _LABELS = {f.name: f.label for f in config.FIELDS}
 _SECRET_NAMES = {f.name for f in config.FIELDS if f.kind in ("secret", "id")}
@@ -89,16 +90,18 @@ class SetupService:
         with self._lock:
             return self._apply([], saved=False, done="Applied. Settings reloaded.")
 
-    def _invalid(self, name):
+    def _invalid(self, name, reason=None):
         known = name in _LABELS  # a name from the request is only echoed if it is one of ours
-        return 400, {"ok": False, "error": "invalid", "field": name if known else None,
-                     "message": f"{_LABELS[name]} is not valid." if known else "That setting is not valid."}
+        message = f"{_LABELS[name]} is not valid." if known else "That setting is not valid."
+        if known and reason == "bot_own_id":
+            message = BOT_OWN_ID_MESSAGE
+        return 400, {"ok": False, "error": "invalid", "field": name if known else None, "message": message}
 
     def _save_and_apply(self, values, clear, extra=None):
         try:
             changed = config.save_env(values, clear, self.env_path)
         except config.SettingError as exc:
-            return self._invalid(exc.name)
+            return self._invalid(exc.name, exc.reason)
         except config.EnvFileError:
             return 500, {"ok": False, "error": "file", "message": "The settings file could not be written. Nothing was changed."}
         if not changed:
