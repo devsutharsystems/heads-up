@@ -219,13 +219,20 @@ MAX_REPOS = 50
 class SettingError(ValueError):
     """A name or a value was refused. The message names the setting only, never the value."""
 
-    def __init__(self, name):
+    def __init__(self, name, reason=None):
         super().__init__(f"invalid {name}")
         self.name = name
+        self.reason = reason  # a short code the page turns into plain words, e.g. "bot_own_id"
 
 
 class EnvFileError(Exception):
     """The settings file could not be read or written safely. The message never contains a value or a path."""
+
+
+def _bot_id(token):
+    """The bot's own numeric ID: the digits before the colon in its token (None if there is no usable token)."""
+    head = (token or "").partition(":")[0]
+    return int(head) if head.isdigit() else None
 
 
 def validate_value(name, raw):
@@ -372,6 +379,10 @@ def save_env(values=None, clear=(), env_path=DEFAULT_ENV):
         old_text = _read_env_text(env_path)
         new_text = _apply(old_text, updates)
         old, new = _literal_values(old_text), _literal_values(new_text)
+        if "TELEGRAM_CHAT_ID" in updates and updates["TELEGRAM_CHAT_ID"]:  # a bot cannot message itself: Telegram answers 403
+            bot_id = _bot_id(updates.get("TELEGRAM_BOT_TOKEN") or old.get("TELEGRAM_BOT_TOKEN"))
+            if bot_id is not None and int(updates["TELEGRAM_CHAT_ID"]) == bot_id:
+                raise SettingError("TELEGRAM_CHAT_ID", "bot_own_id")
         for key in set(old) | set(new):  # the written file must read back exactly: the changed settings, and nothing else moved
             expected = updates[key] if key in updates else old.get(key)
             if (new.get(key) or "") != (expected or ""):

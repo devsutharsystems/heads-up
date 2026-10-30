@@ -64,6 +64,7 @@ class World:
         self.webhook_set = False
         self.updates = []
         self.calls = []  # (method, payload) for every Telegram call
+        self.bot_tokens = []  # the token in the URL of every Telegram call, in step with `calls`
         self.github_writes = []  # every non-GET request to a GitHub host
         self.github_reads = []
         self.github_headers = []  # the headers of every GitHub request, lower-cased
@@ -122,6 +123,7 @@ class World:
         method = request.url.path.rsplit("/", 1)[-1]
         payload = json.loads(request.content or b"{}")
         self.calls.append((method, payload))
+        self.bot_tokens.append(request.url.path.split('/')[1].removeprefix('bot'))
         if self.telegram_raise is not None:
             raise self.telegram_raise
         if method in self.telegram_status:
