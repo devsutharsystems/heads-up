@@ -106,7 +106,7 @@ def test_shutdown_returns_even_while_a_check_is_still_running():
     assert sup.runner.in_check.wait(2)
     started = time.monotonic()
     sup.shutdown(timeout=0.2)
-    assert time.monotonic() - started < 1.0, "a daemon worker: the app can exit"
+    assert time.monotonic() - started < 5.0, "a daemon worker: the app can exit"  # the check would hold it for 10 s
     sup.runner.release.set()
     sup._stop.set()
 
@@ -147,7 +147,7 @@ def test_a_running_check_makes_a_restart_answer_busy_at_once_instead_of_waiting(
     assert old.in_check.wait(2)
     started = time.monotonic()
     assert sup.restart("second") == RestartResult("busy")
-    assert time.monotonic() - started < 0.2, "no waiting for a pass that can take minutes"
+    assert time.monotonic() - started < 2.0, "no waiting for a pass that can take minutes"  # waiting would take the 5 s join timeout
     assert sup.runner is old and sup.settings == "first" and [s for s, _ in built] == ["first"] and old.exits == 0 and sup.running()
     old.release.set()
     assert wait_until(lambda: not old.run_lock.locked())

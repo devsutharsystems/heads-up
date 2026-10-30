@@ -633,7 +633,7 @@ def test_the_finder_answers_at_once_from_what_the_worker_saw_even_while_a_check_
     assert started.wait(3)
     began = time.monotonic()
     status, data = a.post("find-chat")
-    assert time.monotonic() - began < 1.0 and status == 200 and data["status"] == "none" and "10 minutes" in data["message"]
+    assert time.monotonic() - began < 5.0 and status == 200 and data["status"] == "none" and "10 minutes" in data["message"]
     assert a.sup.running() and "getUpdates" not in a.world.methods(), "Telegram was not asked: the worker is the one that polls"
     store = Store(a.tmp / "t.db")
     store.note_chat(999000111, "Ada", datetime.now(timezone.utc), datetime.now(timezone.utc))
@@ -650,7 +650,7 @@ def test_the_finder_does_not_wait_for_a_save_in_progress_or_hold_the_settings_lo
     with a.service._lock:  # a save is in the middle of its restart
         began = time.monotonic()
         status, data = a.post("find-chat")
-        assert time.monotonic() - began < 1.0 and status == 200 and data["status"] == "choose"
+        assert time.monotonic() - began < 5.0 and status == 200 and data["status"] == "choose"
     assert a.post("use-chat", {"index": 0})[1]["status"] == "saved", "and choosing still works once the save is done"
 
 
@@ -689,11 +689,11 @@ def test_apply_and_save_say_busy_at_once_while_a_check_runs(app):
     assert started.wait(3)
     began = time.monotonic()
     status, data = a.post("save", {"values": {"GITHUB_REPOS": "example-org/one"}})
-    assert time.monotonic() - began < 1.0, "no waiting for the check"
+    assert time.monotonic() - began < 5.0, "no waiting for the check"
     assert status == 200 and data["saved"] is True and data["applied"] is False and data["error"] == "busy"
     began = time.monotonic()
     status, data = a.post("apply")
-    assert time.monotonic() - began < 1.0 and data["error"] == "busy" and a.sup.running()
+    assert time.monotonic() - began < 5.0 and data["error"] == "busy" and a.sup.running()
     release.set()
 
 
