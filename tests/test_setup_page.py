@@ -4,6 +4,7 @@ a real browser would print "[object ...]", fails here. Skipped when Node is not 
 its server side are in test_setup_server.py and run everywhere."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -27,13 +28,14 @@ def report(tmp_path_factory):
         pytest.skip("node is not installed")
     path = tmp_path_factory.mktemp("page") / "setup_page.js"
     path.write_text(script_of(render_setup_page("tok-for-tests", "nonce-for-tests")), encoding="utf-8")
-    done = subprocess.run([NODE, str(HARNESS), str(path)], capture_output=True, text=True, timeout=60)
+    done = subprocess.run([NODE, str(HARNESS), str(path)], capture_output=True, text=True, timeout=60,
+                          env={**os.environ, "TZ": "Asia/Kolkata"})
     assert done.returncode == 0, done.stderr[-2000:]
     return json.loads(done.stdout)
 
 
 def test_the_page_script_is_valid_javascript_and_runs_every_scenario(report):
-    assert len(report) >= 17
+    assert len(report) >= 25
 
 
 def test_every_scenario_of_the_page_passes(report):
@@ -53,3 +55,9 @@ def test_the_script_has_no_inline_handler_no_html_assignment_and_no_url():
     for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "http://", "https://", "XMLHttpRequest", "localStorage", "sessionStorage"):
         assert banned not in script, banned
     assert script.count("fetch(") == 1, "one place sends requests"
+
+
+def test_the_outcome_bar_comes_before_the_cards_in_the_real_page():
+    html = render_setup_page("t", "n")
+    assert html.index('id="message"') < html.index('id="app"'), "an outcome written below six cards is off screen"
+    assert "#message { position:sticky; top:0" in html

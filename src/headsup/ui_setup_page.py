@@ -30,6 +30,8 @@ _EXTRA_CSS = """
   .results { list-style:none; margin:0; padding:0; font-size:var(--t-sm); } .results li { display:flex; gap:8px; align-items:baseline; padding:3px 0; flex-wrap:wrap; }
   a.link { color:#3730a3; font-weight:600; font-size:var(--t-sm); text-decoration:none; } a.link:hover { text-decoration:underline; }
   [hidden] { display:none !important; }
+  #message { position:sticky; top:0; z-index:10; }
+  #message:not(:empty) { margin:0 0 var(--s2); }
 """
 
 _SCRIPT = r"""
@@ -75,10 +77,21 @@ _SCRIPT = r"""
     }
   }
 
+  // The outcome line sits in a sticky bar at the top of the page, so it is on screen whichever card's button was pressed.
   function say(text, kind, withApply) {
-    el('message').replaceChildren(
+    const box = el('message');
+    box.replaceChildren(
       text ? h('div', { class: ('notice ' + (kind || '')).trim(), text: text }) : '',
       withApply ? h('button', { class: 'secondary small', type: 'button', id: 'apply', text: 'Apply saved settings', on: { click: apply } }) : '');
+    if (text && typeof box.scrollIntoView === 'function') box.scrollIntoView({ block: 'nearest' });
+  }
+
+  // The server sends the time in UTC; the person reading it lives in local time.
+  function localTime(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso).slice(0, 16).replace('T', ' ');
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
   async function busyWhile(fn) {
@@ -210,7 +223,7 @@ _SCRIPT = r"""
       say('', '');
       area.replaceChildren(h('p', { class: 'hint', text: data.message }),
         h('ul', { class: 'choices' }, data.choices.map((c) => h('li', {},
-          h('span', { text: c.name + (c.last ? ' (last message ' + String(c.last).slice(0, 16).replace('T', ' ') + ' UTC)' : '') }),
+          h('span', { text: c.name + (c.last ? ' (last message ' + localTime(c.last) + ')' : '') }),
           h('button', { class: 'primary small', type: 'button', text: data.single ? 'Yes, this is me' : 'Use this chat', on: { click: () => busyWhile(() => useChat(c.index)) } })))));
     } else {
       area.replaceChildren();
@@ -240,7 +253,7 @@ _SCRIPT = r"""
     el('results').replaceChildren(waiting('GitHub'), waiting('Calendar'), waiting('Telegram'));
     const [status, data] = await call('POST', '/api/setup/test-connection', {});
     if (status !== 200 || !data.ok) { el('results').replaceChildren(); say(data.message || 'The test could not run.', 'bad'); return; }
-    say('', '');
+    say('Test finished. The results are at the bottom of the page.', 'good');
     const ms = data.timing_ms || {};
     const took = (key) => (typeof ms[key] === 'number' ? ' (' + (ms[key] / 1000).toFixed(1) + ' s)' : '');
     const line = (name, ok, text, key) => h('li', {}, h('span', { class: 'chip ' + (ok ? 'ok' : 'bad'), text: ok ? 'OK' : 'Problem' }), h('span', { text: name + ': ' + text + took(key) }));
@@ -283,13 +296,13 @@ _HTML = """<!doctype html>
   </div>
   <a class="link" href="/">Back to the dashboard</a>
 </header>
+<div id="message" role="status" aria-live="polite"></div>
 <div id="notices"></div>
 <div id="app"></div>
 <div class="buttons">
   <button id="save" class="primary" type="button">Save</button>
   <button id="test" class="secondary" type="button">Test connection</button>
 </div>
-<div id="message" role="status" aria-live="polite"></div>
 <ul id="results" class="results"></ul>
 <footer>Local only (127.0.0.1). Saving writes the settings file on this Mac (readable by you only) and the app starts using the new settings at once. Haiku and the write token are not tested: a test call costs money, and the write token can only be tested by re-running a build.</footer>
 </main>

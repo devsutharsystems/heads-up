@@ -43,7 +43,8 @@ function makeDocument() {
   doc.createElement = (tag) => { doc.created.push(tag.toLowerCase()); return new El(doc, tag); };
   doc.write = forbid('document.write');
   doc.body = new El(doc, 'body');
-  for (const id of ['notices', 'app', 'message', 'results']) { const e = new El(doc, id === 'results' ? 'ul' : 'div'); e.setAttribute('id', id); doc.body.append(e); }
+  // same order as the real page: the outcome bar is above the cards
+  for (const id of ['message', 'notices', 'app', 'results']) { const e = new El(doc, id === 'results' ? 'ul' : 'div'); e.setAttribute('id', id); doc.body.append(e); }
   for (const id of ['save', 'test']) { const b = new El(doc, 'button'); b.setAttribute('id', id); doc.body.append(b); }
   doc.getElementById = (id) => doc.body.all().find((e) => e.id === id) || null;
   doc.querySelector = (sel) => (sel === 'meta[name=csrf]' ? { content: TOKEN } : null);
@@ -100,7 +101,7 @@ async function boot(form, routes) {
   const timers = [];
   const fakeSetTimeout = (f, ms) => { if (ms >= 60000) { const rec = { f, ms, cleared: false }; timers.push(rec); return rec; } return setTimeout(f, ms); };
   const fakeClearTimeout = (h) => { if (h && typeof h === 'object' && 'cleared' in h) h.cleared = true; else clearTimeout(h); };
-  const sandbox = { document: doc, fetch: fetchFake, JSON, Object, Array, String, Promise, Map, Set, AbortController, setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout, console: { log() {}, error() {} } };
+  const sandbox = { document: doc, fetch: fetchFake, Date, JSON, Object, Array, String, Promise, Map, Set, AbortController, setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout, console: { log() {}, error() {} } };
   vm.runInNewContext(script, sandbox);
   await settle();
   return { doc, calls, timers, byId: (id) => doc.getElementById(id), buttonLabelled: (label) => doc.body.all().filter((e) => e.tagName === 'BUTTON' && e.textContent === label)[0] || null,
@@ -401,6 +402,49 @@ async function scenario(name, fn) {
     form.fields[3].from_shell = true;
     const t = await boot(form, {});
     assert(t.text().includes('This is also set in your shell, and the shell wins. Saving here changes the settings file only.'));
+  });
+
+  // An outcome line the person cannot see is no outcome. The fake DOM has no layout, so "can be seen" is modelled as: the bar that
+  // holds it comes before the cards in the page, so a button in any card cannot leave it below the fold.
+  const outcomeShown = (t, text) => {
+    const order = t.doc.body.children.map((c) => c.id);
+    assert(order.indexOf('message') >= 0 && order.indexOf('message') < order.indexOf('app'), 'the outcome bar is above the cards: ' + order);
+    assert(t.byId('message').textContent.includes(text), 'the outcome bar says "' + text + '", it says "' + t.byId('message').textContent + '"');
+  };
+
+  await scenario('the outcome of Send test message is in the bar above the cards and stays until the next action', async () => {
+    const t = await boot(baseForm(), { 'POST /api/setup/test-message': () => [200, { ok: true, message: 'SENT: the test message reached Telegram.' }] });
+    await t.buttonLabelled('Send test message').click(); await settle();
+    outcomeShown(t, 'SENT: the test message reached Telegram.');
+    await settle();
+    outcomeShown(t, 'SENT: the test message reached Telegram.');
+    const bad = await boot(baseForm(), { 'POST /api/setup/test-message': () => [200, { ok: false, message: 'NOT SENT (rejected): Telegram said no.' }] });
+    await bad.buttonLabelled('Send test message').click(); await settle();
+    outcomeShown(bad, 'NOT SENT (rejected): Telegram said no.');
+  });
+
+  await scenario('Yes, this is me shows Saved in the bar, and it survives the form being redrawn', async () => {
+    const after = baseForm();
+    after.fields[1].state = 'set';
+    const t = await boot(baseForm(), {
+      'POST /api/setup/find-chat': () => [200, { ok: true, status: 'choose', single: true, message: 'Is this you?', choices: [{ index: 0, name: 'Ada', last: '2026-11-02T11:46:40+00:00' }] }],
+      'POST /api/setup/use-chat': () => [200, { ok: true, status: 'saved', name: 'Ada', applied: true, message: 'Saved. Settings reloaded.', form: after }],
+    });
+    await t.buttonLabelled('Find my chat ID').click(); await settle();
+    await t.buttonLabelled('Yes, this is me').click(); await settle();
+    outcomeShown(t, 'Saved. Settings reloaded. Chat: Ada.');
+    assert(t.byId('f-TELEGRAM_CHAT_ID').hidden === true, 'the form was redrawn with the chat ID now set');
+  });
+
+  await scenario('the chat finder shows the last message in local time, not UTC', async () => {
+    const t = await boot(baseForm(), { 'POST /api/setup/find-chat': () => [200, { ok: true, status: 'choose', single: true, message: 'Is this you?', choices: [{ index: 0, name: 'Ada', last: '2026-11-02T11:46:40+00:00' }, { index: 1, name: 'Bo', last: 'garbage' }] }] });
+    await t.buttonLabelled('Find my chat ID').click(); await settle();
+    const d = new Date('2026-11-02T11:46:40+00:00');
+    const p = (n) => String(n).padStart(2, '0');
+    const local = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    assert(t.text().includes('(last message ' + local + ')'), 'local time shown: ' + t.byId('chat-area').textContent);
+    assert(!t.text().includes('UTC'), 'no UTC label');
+    assert(t.text().includes('(last message garbage)'), 'an unreadable time is shown as it came');
   });
 
   process.stdout.write(JSON.stringify(report));
