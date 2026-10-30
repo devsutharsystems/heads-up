@@ -39,7 +39,7 @@ _SCRIPT = r"""
   'use strict';
   const token = document.querySelector('meta[name=csrf]').content;
   const el = (id) => document.getElementById(id);
-  const GROUPS = ['Telegram', 'GitHub', 'Calendar', 'Haiku', 'Timing', 'Judge'];
+  const GROUPS = ['Telegram', 'GitHub', 'Calendar', 'Timing', 'Judge', 'Optional extras'];
   let form = null;
   let busy = false;
   let fields = {};
